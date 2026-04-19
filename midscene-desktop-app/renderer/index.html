@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Midscene 浏览器助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Midscene 浏览器助手</h1>
+      <p class="muted">自然语言驱动 Chrome（macOS 开发验证；Windows 后续）</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>任务</h2>
+        <textarea
+          id="task"
+          rows="5"
+          placeholder="例如：打开 https://www.baidu.com ，在搜索框输入「今日新闻」并搜索"
+        ></textarea>
+        <div class="row">
+          <button id="run" type="button" class="primary">运行</button>
+          <span id="status" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>模型配置</h2>
+        <p class="hint">
+          与 Midscene 一致，使用 OpenAI 兼容接口。密钥保存在本机用户目录下的 JSON 文件中。
+        </p>
+        <label>API Key</label>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." />
+
+        <label>Base URL</label>
+        <input id="baseUrl" type="url" placeholder="https://api.openai.com/v1" />
+
+        <label>模型名称</label>
+        <input id="modelName" type="text" placeholder="gpt-4.1" />
+
+        <label>模型族 (MIDSCENE_MODEL_FAMILY)</label>
+        <input id="modelFamily" type="text" placeholder="gpt-4 或 gpt-5 等，见文档" />
+
+        <div class="row">
+          <button id="save" type="button">保存配置</button>
+          <span id="saveHint" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>日志</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script src="./index.js"></script>
+  </body>
+</html>
