@@ -1,8 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard } from 'electron';
 import { loadConfig, saveConfig } from './config-store.js';
-import { runNaturalLanguageTask } from './chrome-runner.js';
+import { mergeTaskPrompts, runNaturalLanguageTask } from './chrome-runner.js';
+import { loadRecipe, saveRecipe } from './recipe-store.js';
+import { exportTaskBundle, importTaskBundle } from './task-bundle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,8 +13,8 @@ let running = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 720,
-    height: 640,
+    width: 760,
+    height: 820,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -44,13 +46,44 @@ ipcMain.handle('config:load', () => loadConfig(app.getPath('userData')));
 
 ipcMain.handle('config:save', (_e, patch) => saveConfig(app.getPath('userData'), patch ?? {}));
 
-ipcMain.handle('task:run', async (_e, task) => {
+ipcMain.handle('recipe:load', () => loadRecipe(app.getPath('userData')));
+
+ipcMain.handle('recipe:save', (_e, patch) => saveRecipe(app.getPath('userData'), patch ?? {}));
+
+ipcMain.handle('bundle:export', (_e, recipe) => {
+  return exportTaskBundle({
+    name: recipe?.name,
+    mainPrompt: recipe?.mainPrompt ?? '',
+    businessContext: recipe?.businessContext ?? '',
+  });
+});
+
+ipcMain.handle('bundle:import', (_e, text) => importTaskBundle(text));
+
+ipcMain.handle('clipboard:write', (_e, text) => {
+  clipboard.writeText(String(text ?? ''));
+  return { ok: true };
+});
+
+ipcMain.handle('clipboard:read', () => clipboard.readText());
+
+ipcMain.handle('task:run', async (_e, payload) => {
   if (running) {
     return { ok: false, error: '已有任务在执行，请等待结束。' };
   }
-  const trimmed = typeof task === 'string' ? task.trim() : '';
-  if (!trimmed) {
-    return { ok: false, error: '请输入任务描述。' };
+
+  let mainPrompt = '';
+  let businessContext = '';
+  if (typeof payload === 'string') {
+    mainPrompt = payload;
+  } else if (payload && typeof payload === 'object') {
+    mainPrompt = payload.mainPrompt ?? '';
+    businessContext = payload.businessContext ?? '';
+  }
+
+  const main = String(mainPrompt).trim();
+  if (!main) {
+    return { ok: false, error: '请填写主任务（要执行的操作）。' };
   }
 
   const cfg = loadConfig(app.getPath('userData'));
@@ -67,13 +100,16 @@ ipcMain.handle('task:run', async (_e, task) => {
     MIDSCENE_RUN_DIR: midsceneRunDir,
   };
 
+  const merged = mergeTaskPrompts(main, businessContext);
+
   running = true;
   try {
-    await runNaturalLanguageTask(
-      trimmed,
-      { modelConfig, midsceneRunDir },
-      (line) => broadcastLog(line),
-    );
+    await runNaturalLanguageTask(merged, {
+      modelConfig,
+      connectMode: cfg.connectMode,
+      cdpWsUrl: cfg.cdpWsUrl,
+      bridgePort: cfg.bridgePort,
+    }, (line) => broadcastLog(line));
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
