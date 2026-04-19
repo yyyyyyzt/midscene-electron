@@ -1,0 +1,22 @@
+{
+  "name": "midscene-desktop-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal Electron + Midscene.js desktop helper to drive Google Chrome with natural language",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "node ./scripts/puppeteer-postinstall.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@midscene/web": "^1.7.4",
+    "puppeteer": "^24.8.0"
+  },
+  "devDependencies": {
+    "electron": "^35.1.0"
+  }
+}

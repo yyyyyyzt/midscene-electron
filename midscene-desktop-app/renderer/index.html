@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Midscene 浏览器助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Midscene 浏览器助手</h1>
+      <p class="muted">
+        先在本机 Chrome 登录系统，再用 Bridge 附加到当前标签；调试完成后用「任务包」分享给同事（仅文本，不含
+        Key）
+      </p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>任务与业务上下文</h2>
+        <p class="hint">
+          「业务上下文」用于多次调试时补充术语、菜单路径、校验规则；与「主任务」会一并发给模型。定稿后复制「任务包」即可微信转发。
+        </p>
+        <label>任务名称（可选，写入任务包 n 字段）</label>
+        <input id="recipeName" type="text" placeholder="例如：财务报销-提交申请" />
+
+        <label>业务上下文（可选，多轮调试中逐步补充）</label>
+        <textarea id="businessContext" rows="4" placeholder="例如：左侧菜单「费用」→「报销单」；金额单位为元；提交前需勾选同意条款。"></textarea>
+
+        <label>主任务（必填，同事收到任务包后主要改这里的可能性最小）</label>
+        <textarea id="mainPrompt" rows="5" placeholder="例如：在报销单页面填写示例数据并点击提交"></textarea>
+
+        <div class="row wrap">
+          <button id="saveRecipe" type="button">保存草稿</button>
+          <button id="copyBundle" type="button">复制任务包</button>
+          <button id="pasteBundle" type="button">从剪贴板导入</button>
+          <button id="run" type="button" class="primary">运行</button>
+          <span id="status" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>浏览器连接（登录态）</h2>
+        <p class="hint">
+          <strong>推荐 Bridge</strong>：在桌面 Chrome 安装
+          <a href="https://midscenejs.com/bridge-mode" target="_blank" rel="noopener noreferrer">Midscene 扩展</a>，先手动打开网站并登录，再在本工具点运行。扩展会自动连到本机端口（默认 3766）。
+        </p>
+        <label>连接方式</label>
+        <select id="connectMode">
+          <option value="bridge">Bridge — 控制已打开的 Chrome（保留登录）</option>
+          <option value="cdp">CDP — 连接远程调试端口（高级，不关闭浏览器）</option>
+          <option value="launch">启动新 Chrome（干净配置，无你的登录态）</option>
+        </select>
+
+        <div id="bridgeFields">
+          <label>Bridge 端口</label>
+          <input id="bridgePort" type="number" min="1" max="65535" step="1" placeholder="3766" />
+        </div>
+
+        <div id="cdpFields" class="hidden">
+          <label>Chrome 调试 WebSocket 地址</label>
+          <input
+            id="cdpWsUrl"
+            type="text"
+            placeholder="ws://127.0.0.1:9222/devtools/browser/..."
+          />
+          <p class="hint small">
+            Windows 示例：先关闭所有 Chrome，再运行<br />
+            <code>"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222</code
+            ><br />
+            然后在 <code>chrome://version</code> 或启动日志里找到 DevTools 的 ws 地址粘贴到此处。
+          </p>
+        </div>
+
+        <div class="row">
+          <button id="saveAppSettings" type="button">保存连接设置</button>
+          <span id="settingsHint" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>模型配置</h2>
+        <p class="hint">API Key 仅存本机，不会进入任务包。同事需各自配置自己的 Key。</p>
+        <label>API Key</label>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." />
+
+        <label>Base URL</label>
+        <input id="baseUrl" type="url" placeholder="https://api.openai.com/v1" />
+
+        <label>模型名称</label>
+        <input id="modelName" type="text" placeholder="gpt-4.1" />
+
+        <label>模型族 (MIDSCENE_MODEL_FAMILY)</label>
+        <input id="modelFamily" type="text" placeholder="gpt-4 或 gpt-5 等" />
+
+        <div class="row">
+          <button id="saveModel" type="button">保存模型配置</button>
+          <span id="saveHint" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>日志</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script src="./index.js"></script>
+  </body>
+</html>
