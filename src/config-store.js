@@ -9,8 +9,6 @@ const FILE_NAME = 'app-config.json';
  *   baseUrl: string;
  *   modelName: string;
  *   modelFamily: string;
- *   connectMode: 'launch' | 'bridge' | 'cdp';
- *   cdpWsUrl: string;
  *   bridgePort: number;
  * }} AppConfig
  */
@@ -21,8 +19,6 @@ const DEFAULTS = {
   baseUrl: 'https://api.openai.com/v1',
   modelName: 'gpt-4.1',
   modelFamily: 'gpt-4',
-  connectMode: 'bridge',
-  cdpWsUrl: '',
   bridgePort: 3766,
 };
 
@@ -35,6 +31,9 @@ export function configFilePath(userDataPath) {
 }
 
 /**
+ * 读取历史/当前 JSON，归一到 Bridge-only 配置形状。
+ * 兼容旧字段（connectMode / cdpWsUrl 等）：读取时忽略，保存时丢弃。
+ *
  * @param {string} userDataPath
  * @returns {AppConfig}
  */
@@ -43,23 +42,15 @@ export function loadConfig(userDataPath) {
   try {
     const raw = fs.readFileSync(file, 'utf8');
     const parsed = JSON.parse(raw);
-    const connectMode =
-      parsed.connectMode === 'launch' || parsed.connectMode === 'bridge' || parsed.connectMode === 'cdp'
-        ? parsed.connectMode
-        : DEFAULTS.connectMode;
     const bridgePort =
       typeof parsed.bridgePort === 'number' && Number.isFinite(parsed.bridgePort)
         ? Math.floor(parsed.bridgePort)
         : DEFAULTS.bridgePort;
     return {
-      ...DEFAULTS,
-      ...parsed,
       apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : DEFAULTS.apiKey,
       baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : DEFAULTS.baseUrl,
       modelName: typeof parsed.modelName === 'string' ? parsed.modelName : DEFAULTS.modelName,
       modelFamily: typeof parsed.modelFamily === 'string' ? parsed.modelFamily : DEFAULTS.modelFamily,
-      connectMode,
-      cdpWsUrl: typeof parsed.cdpWsUrl === 'string' ? parsed.cdpWsUrl : DEFAULTS.cdpWsUrl,
       bridgePort: bridgePort > 0 ? bridgePort : DEFAULTS.bridgePort,
     };
   } catch {
@@ -74,23 +65,15 @@ export function loadConfig(userDataPath) {
  */
 export function saveConfig(userDataPath, patch) {
   const current = loadConfig(userDataPath);
-  const connectMode =
-    patch.connectMode === 'launch' || patch.connectMode === 'bridge' || patch.connectMode === 'cdp'
-      ? patch.connectMode
-      : current.connectMode;
   const bridgePort =
     typeof patch.bridgePort === 'number' && Number.isFinite(patch.bridgePort)
       ? Math.max(1, Math.floor(patch.bridgePort))
       : current.bridgePort;
   const next = {
-    ...current,
-    ...patch,
     apiKey: typeof patch.apiKey === 'string' ? patch.apiKey : current.apiKey,
     baseUrl: typeof patch.baseUrl === 'string' ? patch.baseUrl : current.baseUrl,
     modelName: typeof patch.modelName === 'string' ? patch.modelName : current.modelName,
     modelFamily: typeof patch.modelFamily === 'string' ? patch.modelFamily : current.modelFamily,
-    connectMode,
-    cdpWsUrl: typeof patch.cdpWsUrl === 'string' ? patch.cdpWsUrl : current.cdpWsUrl,
     bridgePort,
   };
   const file = configFilePath(userDataPath);

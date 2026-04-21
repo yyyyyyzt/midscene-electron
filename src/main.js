@@ -106,8 +106,6 @@ ipcMain.handle('task:run', async (_e, payload) => {
   try {
     await runNaturalLanguageTask(merged, {
       modelConfig,
-      connectMode: cfg.connectMode,
-      cdpWsUrl: cfg.cdpWsUrl,
       bridgePort: cfg.bridgePort,
     }, (line) => broadcastLog(line));
     return { ok: true };
