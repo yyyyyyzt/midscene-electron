@@ -34,27 +34,27 @@
 
 ### 阶段 A — UI 与配置收敛（行为以 Bridge 为准，可暂保留后端多模式代码）
 
-- [ ] 移除连接方式下拉及 CDP 相关 DOM；默认展示 Bridge 端口与扩展文档链接。
-- [ ] `renderer/index.js`：删除 `connectMode`/`cdpWsUrl` 的读写与 `updateConnectModeUi`；保存应用设置时只写 `bridgePort`（若仍调用 `saveConfig`，可传固定 `connectMode: 'bridge'` 直至阶段 B）。
-- [ ] 用户文案：强调「仅支持 Bridge」，避免与已删除选项矛盾。
+- [x] 移除连接方式下拉及 CDP 相关 DOM；默认展示 Bridge 端口与扩展文档链接。
+- [x] `renderer/index.js`：删除 `connectMode`/`cdpWsUrl` 的读写与 `updateConnectModeUi`；保存应用设置时只写 `bridgePort`。
+- [x] 用户文案：强调「仅支持 Bridge」，避免与已删除选项矛盾。
 
 ### 阶段 B — 运行时与配置模型
 
-- [ ] `chrome-runner.js`：删除 `cdp` / `launch` 分支；`runNaturalLanguageTask` 仅保留 Bridge 逻辑；移除对 `puppeteer`、`@midscene/web/puppeteer` 的 import（若整文件无引用）。
-- [ ] `config-store.js`：类型与默认值去掉 `launch`/`cdp`；`loadConfig` 将历史 JSON 中的 `connectMode` 归一为 `bridge`，并不再向外暴露 CDP 字段（或保留读入但忽略，避免破坏旧文件结构——二选一在提交说明中写清）。
-- [ ] `main.js`：`runNaturalLanguageTask` 调用参数与新的 `loadConfig` 形状一致。
+- [x] `chrome-runner.js`：删除 `cdp` / `launch` 分支；`runNaturalLanguageTask` 仅保留 Bridge 逻辑；移除对 `puppeteer`、`@midscene/web/puppeteer` 的 import。
+- [x] `config-store.js`：类型与默认值去掉 `launch`/`cdp`；`loadConfig` 读取历史 JSON 时忽略 `connectMode` / `cdpWsUrl` 字段；`saveConfig` 只写回 Bridge 专用字段（旧字段在下次保存时自动丢弃）。
+- [x] `main.js`：`runNaturalLanguageTask` 调用参数仅传 `bridgePort`，与新的 `loadConfig` 形状一致。
 
 ### 阶段 C — 依赖与安装链路
 
-- [ ] `package.json`：移除 `puppeteer`；移除 `postinstall`（或替换为不再下载浏览器的脚本）。
-- [ ] 删除 `scripts/puppeteer-postinstall.cjs`（若已无引用）。
-- [ ] 在干净 clone 下执行 `npm i`（可配合现有 `.npmrc` 的 `audit=false` 等），确认无 postinstall 错误且应用可启动。
-- [ ] 可选：`package-lock.json` 随依赖变更更新并提交。
+- [x] `package.json`：移除 `puppeteer`；移除 `postinstall`。
+- [x] 删除 `scripts/puppeteer-postinstall.cjs`。
+- [ ] （跳过）在干净 clone 下执行 `npm i` 验证 —— 按任务要求跳过依赖安装环节，需由开发者本地再次 `npm i` 以同步 `package-lock.json`。
+- [ ] （跳过）`package-lock.json` 随依赖变更更新并提交 —— 同上。
 
 ### 阶段 D — 文档与分发说明
 
-- [ ] 更新 `README.md`：连接方式仅 Bridge；Windows 用户扩展 + 端口说明；与 exe 分发相关的先决条件。
-- [ ] 若有 Electron 打包脚本/README 小节，注明不需要随应用分发 Puppeteer 自带浏览器。
+- [x] 更新 `README.md`：连接方式仅 Bridge；Windows 用户扩展 + 端口说明；与 exe 分发相关的先决条件。
+- [x] 已在 README 中注明 Electron 打包无需随应用分发 Puppeteer 自带浏览器。
 
 ---
 
@@ -79,7 +79,7 @@
 
 | 阶段 | 状态 | 备注 |
 |------|------|------|
-| A UI/配置 | 待开始 | |
-| B 运行时 | 待开始 | |
-| C 依赖 | 待开始 | |
-| D 文档 | 待开始 | |
+| A UI/配置 | 已完成 | 渲染层仅剩 Bridge 端口与扩展说明 |
+| B 运行时 | 已完成 | `chrome-runner.js` 去掉 puppeteer，`config-store.js` 忽略旧字段 |
+| C 依赖 | 已完成（跳过安装验证） | 按任务要求跳过 `npm i`；开发者本地需重新安装以同步 lockfile |
+| D 文档 | 已完成 | README 改为仅 Bridge，并补充分发前提 |
