@@ -40,36 +40,15 @@
       </section>
 
       <section class="card">
-        <h2>浏览器连接（登录态）</h2>
+        <h2>浏览器连接（Bridge）</h2>
         <p class="hint">
-          <strong>推荐 Bridge</strong>：在桌面 Chrome 安装
-          <a href="https://midscenejs.com/bridge-mode" target="_blank" rel="noopener noreferrer">Midscene 扩展</a>，先手动打开网站并登录，再在本工具点运行。扩展会自动连到本机端口（默认 3766）。
+          本工具<strong>仅支持 Bridge 模式</strong>：请在桌面 Chrome 安装
+          <a href="https://midscenejs.com/bridge-mode" target="_blank" rel="noopener noreferrer">Midscene 扩展</a>，先手动打开网站并登录，再在本工具点运行；扩展会连到本机端口（默认 3766）。
         </p>
-        <label>连接方式</label>
-        <select id="connectMode">
-          <option value="bridge">Bridge — 控制已打开的 Chrome（保留登录）</option>
-          <option value="cdp">CDP — 连接远程调试端口（高级，不关闭浏览器）</option>
-          <option value="launch">启动新 Chrome（干净配置，无你的登录态）</option>
-        </select>
 
         <div id="bridgeFields">
           <label>Bridge 端口</label>
           <input id="bridgePort" type="number" min="1" max="65535" step="1" placeholder="3766" />
-        </div>
-
-        <div id="cdpFields" class="hidden">
-          <label>Chrome 调试 WebSocket 地址</label>
-          <input
-            id="cdpWsUrl"
-            type="text"
-            placeholder="ws://127.0.0.1:9222/devtools/browser/..."
-          />
-          <p class="hint small">
-            Windows 示例：先关闭所有 Chrome，再运行<br />
-            <code>"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222</code
-            ><br />
-            然后在 <code>chrome://version</code> 或启动日志里找到 DevTools 的 ws 地址粘贴到此处。
-          </p>
         </div>
 
         <div class="row">

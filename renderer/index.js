@@ -8,11 +8,7 @@ const saveRecipeBtn = document.getElementById('saveRecipe');
 const copyBundleBtn = document.getElementById('copyBundle');
 const pasteBundleBtn = document.getElementById('pasteBundle');
 
-const connectModeEl = document.getElementById('connectMode');
 const bridgePortEl = document.getElementById('bridgePort');
-const cdpWsUrlEl = document.getElementById('cdpWsUrl');
-const bridgeFields = document.getElementById('bridgeFields');
-const cdpFields = document.getElementById('cdpFields');
 const saveAppSettingsBtn = document.getElementById('saveAppSettings');
 const settingsHint = document.getElementById('settingsHint');
 
@@ -31,24 +27,13 @@ function appendLog(line) {
 
 window.desktopApi.onLog((line) => appendLog(line));
 
-function updateConnectModeUi() {
-  const m = connectModeEl.value;
-  bridgeFields.classList.toggle('hidden', m !== 'bridge');
-  cdpFields.classList.toggle('hidden', m !== 'cdp');
-}
-
-connectModeEl.addEventListener('change', updateConnectModeUi);
-
 async function refreshAll() {
   const cfg = await window.desktopApi.loadConfig();
   apiKeyEl.value = cfg.apiKey || '';
   baseUrlEl.value = cfg.baseUrl || '';
   modelNameEl.value = cfg.modelName || '';
   modelFamilyEl.value = cfg.modelFamily || '';
-  connectModeEl.value = cfg.connectMode || 'bridge';
   bridgePortEl.value = cfg.bridgePort != null ? String(cfg.bridgePort) : '3766';
-  cdpWsUrlEl.value = cfg.cdpWsUrl || '';
-  updateConnectModeUi();
 
   const recipe = await window.desktopApi.loadRecipe();
   recipeNameEl.value = recipe.name || '';
@@ -106,8 +91,6 @@ saveAppSettingsBtn.addEventListener('click', async () => {
   try {
     const port = Number.parseInt(bridgePortEl.value, 10);
     await window.desktopApi.saveConfig({
-      connectMode: connectModeEl.value,
-      cdpWsUrl: cdpWsUrlEl.value,
       bridgePort: Number.isFinite(port) ? port : 3766,
     });
     settingsHint.textContent = '已保存';
