@@ -6,8 +6,8 @@ import { runSteps } from './step-runner.js';
 /**
  * 跑一次完整的巡检任务：
  *   1. 连接 Bridge（newTabWithUrl 默认 / currentTab 调试）
- *   2. aiWaitFor 页面就绪
- *   3. （可选）执行用户提供的 YAML flow，做下拉/点击/滚动等复杂导航
+ *   2. aiWaitFor 页面就绪（仅当未配置操作流程；有 flow 时由流程内首步承担）
+ *   3. （可选）执行用户提供的 YAML / Playwright flow，做下拉/点击/滚动等复杂导航
  *   4. aiAssert 非登录页 / 非错误页
  *   5. aiQuery 提取结构化数据
  *   6. 规则引擎判断异常（按 when 决定是否触发告警）
@@ -116,7 +116,14 @@ export async function runInspection(ctx) {
         };
       });
 
-      if (task.readyPrompt?.trim()) {
+      const hasFlow = Boolean(task.flowYaml?.trim());
+      if (hasFlow) {
+        skipPhase(
+          PHASE.READY,
+          '页面就绪 aiWaitFor',
+          '已配置操作流程：就绪由流程内步骤（通常为首条 aiWaitFor）承担，避免在重放前误用「最终页」条件',
+        );
+      } else if (task.readyPrompt?.trim()) {
         await runPhase(PHASE.READY, '页面就绪 aiWaitFor', async () => {
           await agent.aiWaitFor(task.readyPrompt.trim(), { timeoutMs: 60_000 });
           return { prompt: task.readyPrompt.trim() };

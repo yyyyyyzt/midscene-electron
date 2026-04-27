@@ -148,8 +148,8 @@ async function refreshAlerts() {
 
 function updateBadges() {
   taskCountBadge.textContent = state.tasks.length ? String(state.tasks.length) : '';
-  const unresolved = state.alerts.filter((a) => a.state === 'active' || a.state === 'ack').length;
-  alertBadge.textContent = unresolved ? String(unresolved) : '';
+  const needsAttention = state.alerts.filter((a) => a.state === 'active').length;
+  alertBadge.textContent = needsAttention ? String(needsAttention) : '';
 }
 
 function render() {
@@ -655,98 +655,48 @@ async function openRunDetail(runId) {
 
 function renderAlerts() {
   const alerts = state.alerts;
-  if (!state.alertSelection) state.alertSelection = new Set();
-  const visibleIds = new Set(alerts.map((a) => a.id));
-  for (const id of [...state.alertSelection]) if (!visibleIds.has(id)) state.alertSelection.delete(id);
-
-  const selCount = state.alertSelection.size;
-  const allChecked = alerts.length > 0 && alerts.every((a) => state.alertSelection.has(a.id));
 
   contentEl.innerHTML = `
     <div class="page-header">
-      <div><h2>告警中心</h2><div class="sub">异常事件；支持确认 / 静默 / 手动标记恢复</div></div>
+      <div><h2>告警中心</h2><div class="sub">每条告警仅三项操作：确认无误、查看执行详情、删除。后台仍合并同类告警并在任务恢复时自动标记已恢复。</div></div>
       <div class="row">
         <button class="small" id="btnRefreshAlerts">刷新</button>
-        <button class="small danger ghost" id="btnDelSelectedAlerts" ${selCount ? '' : 'disabled'}>删除所选 (<span id="alertSelCount">${selCount}</span>)</button>
-        <button class="small ghost" id="btnClearResolvedAlerts">清空已恢复</button>
-        <button class="small danger ghost" id="btnClearAllAlerts">清空全部</button>
       </div>
     </div>
     ${
       alerts.length
-        ? `<div class="row" style="margin-bottom:.5rem">
-            <label class="toggle"><input id="alertCheckAll" type="checkbox" ${allChecked ? 'checked' : ''} /> 全选</label>
-            <span class="muted">共 ${alerts.length} 条 · 已选 ${selCount}</span>
-          </div>` + alerts.map((a) => `
-          <div class="alert-row" data-alert-id="${a.id}" style="grid-template-columns:24px 1fr auto">
-            <input type="checkbox" data-alert-check="${a.id}" ${state.alertSelection.has(a.id) ? 'checked' : ''} style="margin-top:.4rem;width:auto" />
+        ? `<div class="muted" style="margin-bottom:.6rem">共 ${alerts.length} 条</div>` + alerts.map((a) => {
+          const ackDone = a.state === 'ack' || a.state === 'silenced' || a.state === 'recovered';
+          const ackDisabled = a.state === 'recovered';
+          const ackTitle = a.state === 'recovered'
+            ? '任务已恢复正常，无需再确认'
+            : ackDone
+              ? '已确认过；仍可再次标记'
+              : '标记为已知晓（仍会继续合并计数与恢复检测）';
+          return `
+          <div class="alert-row" data-alert-id="${a.id}">
             <div>
-              <div class="row" style="gap:.4rem">
+              <div class="row" style="gap:.4rem;flex-wrap:wrap">
                 <span class="msg">${escapeHtml(a.taskName)}</span>
                 ${alertStatePill(a.state)}
                 <span class="status-pill ${a.lastSeverity === 'critical' ? 'err' : 'alert'}">${a.lastSeverity}</span>
               </div>
               <div class="detail">${escapeHtml(a.lastMessage)}</div>
-              <div class="detail">首次：${fmtTime(a.firstSeenAt)} · 最近：${fmtTime(a.lastSeenAt)} · 计数：${a.count}${a.recoveredAt ? ' · 恢复：' + fmtTime(a.recoveredAt) : ''}${a.silencedUntil ? ' · 静默至：' + fmtTime(a.silencedUntil) : ''}</div>
+              <div class="detail">首次：${fmtTime(a.firstSeenAt)} · 最近：${fmtTime(a.lastSeenAt)} · 合并计数：${a.count}${a.recoveredAt ? ' · 恢复：' + fmtTime(a.recoveredAt) : ''}${a.silencedUntil ? ' · 曾静默至：' + fmtTime(a.silencedUntil) : ''}</div>
             </div>
-            <div class="row">
-              ${a.state === 'active' ? '<button class="small" data-alert-action="ack">确认</button>' : ''}
-              ${a.state !== 'silenced' && a.state !== 'recovered' ? '<button class="small" data-alert-action="silence">静默 1 小时</button>' : ''}
-              ${a.state !== 'recovered' ? '<button class="small primary" data-alert-action="recover">标记恢复</button>' : ''}
-              ${a.lastRunId ? `<button class="small" data-alert-view="${a.lastRunId}">最近执行</button>` : ''}
+            <div class="row alert-row-actions">
+              <button class="small" data-alert-action="ack" ${ackDisabled ? 'disabled' : ''} title="${escapeHtml(ackTitle)}">确认无误</button>
+              <button class="small primary" data-alert-view="${a.lastRunId || ''}" ${a.lastRunId ? '' : 'disabled'} title="${a.lastRunId ? '打开对应执行记录' : '暂无关联执行记录'}">查看执行详情</button>
               <button class="small danger ghost" data-alert-delete="${a.id}">删除</button>
             </div>
           </div>
-        `).join('')
+        `;
+        }).join('')
         : '<div class="empty">暂无告警。</div>'
     }
   `;
 
   document.getElementById('btnRefreshAlerts')?.addEventListener('click', async () => {
-    await refreshAlerts();
-    render();
-  });
-
-  document.getElementById('alertCheckAll')?.addEventListener('change', (e) => {
-    if (e.target.checked) for (const a of alerts) state.alertSelection.add(a.id);
-    else state.alertSelection.clear();
-    render();
-  });
-
-  document.querySelectorAll('[data-alert-check]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const id = cb.dataset.alertCheck;
-      if (cb.checked) state.alertSelection.add(id);
-      else state.alertSelection.delete(id);
-      const c = document.getElementById('alertSelCount');
-      if (c) c.textContent = String(state.alertSelection.size);
-      const del = document.getElementById('btnDelSelectedAlerts');
-      if (del) del.disabled = state.alertSelection.size === 0;
-    });
-  });
-
-  document.getElementById('btnDelSelectedAlerts')?.addEventListener('click', async () => {
-    const ids = [...state.alertSelection];
-    if (!ids.length) return;
-    if (!confirm(`确认删除选中的 ${ids.length} 条告警？`)) return;
-    await api.deleteAlerts(ids);
-    state.alertSelection = new Set();
-    await refreshAlerts();
-    render();
-  });
-
-  document.getElementById('btnClearResolvedAlerts')?.addEventListener('click', async () => {
-    if (!confirm('确认清空所有已恢复的告警？')) return;
-    await api.clearAlerts('resolved');
-    state.alertSelection = new Set();
-    await refreshAlerts();
-    render();
-  });
-
-  document.getElementById('btnClearAllAlerts')?.addEventListener('click', async () => {
-    if (!confirm('确认清空全部告警？此操作不可撤销。')) return;
-    await api.clearAlerts('all');
-    state.alertSelection = new Set();
     await refreshAlerts();
     render();
   });
@@ -762,16 +712,20 @@ function renderAlerts() {
 
   for (const row of document.querySelectorAll('[data-alert-id]')) {
     const id = row.dataset.alertId;
-    row.querySelectorAll('[data-alert-action]').forEach((btn) => {
+    row.querySelectorAll('[data-alert-action="ack"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const action = btn.dataset.alertAction;
-        await api.updateAlertState(id, action, action === 'silence' ? 60 : undefined);
+        if (btn.disabled) return;
+        await api.updateAlertState(id, 'ack');
         await refreshAlerts();
         render();
       });
     });
     row.querySelectorAll('[data-alert-view]').forEach((btn) => {
-      btn.addEventListener('click', () => openRunDetail(btn.dataset.alertView));
+      btn.addEventListener('click', () => {
+        const rid = btn.dataset.alertView;
+        if (!rid) return;
+        openRunDetail(rid);
+      });
     });
   }
 }
@@ -1297,11 +1251,12 @@ function renderWizardBody(step, d) {
     return `
       <label class="field">页面就绪条件（aiWaitFor）</label>
       <textarea id="f_readyPrompt" rows="2">${escapeHtml(d.readyPrompt)}</textarea>
+      <p class="hint" style="margin-top:.25rem">若下方已填写操作流程，执行时会<strong>跳过</strong>本项，由流程内首条 <code>aiWaitFor</code> 判断入口页就绪。请勿把「点完筛选后的最终页面状态」写在这里。</p>
 
       <details class="collapse" style="margin-top:.6rem" ${d.flowYaml ? 'open' : ''}>
         <summary>📜 操作流程（可选 · YAML 或 Playwright 代码，适合下拉/滚动/复杂导航）</summary>
         <div class="collapse-body">
-          <p class="hint">用 Midscene 扩展 Recorder 录制后，YAML 或 Playwright 代码任选一种粘贴。执行时按录制顺序<strong>逐步重放</strong>，并实时上报每步的状态与耗时；下方可开启 AI 兜底。</p>
+          <p class="hint">用 Midscene 扩展 Recorder 录制后，YAML 或 Playwright 代码任选一种粘贴。执行时按录制顺序<strong>逐步重放</strong>，并实时上报每步的状态与耗时；有本段内容时不会先单独执行上方的「页面就绪」。下方可开启 AI 兜底。</p>
           <textarea id="f_flowYaml" rows="10" placeholder="粘贴 YAML 或 Playwright 代码 — 系统会自动识别">${escapeHtml(d.flowYaml || '')}</textarea>
           <div class="row" style="margin-top:.4rem">
             <button class="small" type="button" id="wzYamlPreview">解析并预览步骤</button>
