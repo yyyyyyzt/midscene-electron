@@ -23,6 +23,8 @@ import {
 import { Scheduler } from './scheduler/scheduler.js';
 import { notify, openReport } from './alerts/notifier.js';
 import { runInspection } from './runtime/inspection-runner.js';
+import { generateTaskFromPrompt } from './runtime/task-generator.js';
+import { MODEL_PRESETS } from './store/model-presets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -221,3 +223,13 @@ ipcMain.handle('alert:list', () => listAlerts(userDataPath()));
 ipcMain.handle('alert:update', (_e, { id, action, minutes }) =>
   updateAlertState(userDataPath(), id, action, minutes),
 );
+
+ipcMain.handle('preset:list', () => MODEL_PRESETS);
+
+ipcMain.handle('task:generate', async (_e, { description }) => {
+  const cfg = loadConfig(userDataPath());
+  return generateTaskFromPrompt({
+    description: String(description || ''),
+    profile: cfg.defaultModel,
+  });
+});

@@ -111,18 +111,20 @@ api.onSchedulerEvent(async (evt) => {
 
 async function refreshDataSilent() {
   try {
-    const [tasks, runs, st, alerts, cfg] = await Promise.all([
+    const [tasks, runs, st, alerts, cfg, presets] = await Promise.all([
       api.listTasks(),
       api.listRuns(null, 30),
       api.stats(),
       api.listAlerts(),
       api.loadConfig(),
+      state.presets ? Promise.resolve(state.presets) : api.listPresets(),
     ]);
     state.tasks = tasks || [];
     state.runs = runs || [];
     state.stats = st || state.stats;
     state.alerts = alerts || [];
     state.config = cfg;
+    state.presets = presets || [];
     updateBadges();
   } catch (e) {
     console.error(e);
@@ -157,10 +159,25 @@ function renderOverview() {
     .filter((t) => !t.paused && t.schedule.enabled && t.nextRunAt)
     .sort((a, b) => (a.nextRunAt || 0) - (b.nextRunAt || 0))[0];
 
+  const needSetup = !cfg?.defaultModel?.apiKey;
+  const noTask = state.tasks.length === 0;
+
   contentEl.innerHTML = `
     <div class="page-header">
       <div><h2>总览</h2><div class="sub">专用值守电脑的巡检状态一览</div></div>
     </div>
+
+    ${needSetup || noTask ? `
+      <div class="card">
+        <h3>新手指引</h3>
+        <ol class="muted" style="padding-left:1.2rem;line-height:1.9">
+          <li>在桌面 Chrome 安装 <a href="https://midscenejs.com/bridge-mode" target="_blank" rel="noreferrer">Midscene 扩展</a> 并切到 Bridge 模式。</li>
+          <li>${needSetup ? '<a href="#" data-route-link="settings">前往「设置」</a> 选择「豆包预设」并粘贴 API Key。' : '<span class="muted">设置：默认模型已就绪。</span>'}</li>
+          <li>${noTask ? '<a href="#" data-route-link="tasks">前往「任务」</a> 点「新建任务（AI 帮手）」，用一句话描述要监控什么。' : '<span class="muted">任务：已有 ' + state.tasks.length + ' 个任务。</span>'}</li>
+          <li>在桌面 Chrome 中手工登录目标系统，让扩展点击「允许连接」即可。</li>
+        </ol>
+      </div>
+    ` : ''}
 
     <div class="grid">
       <div class="stat">
@@ -201,6 +218,13 @@ function renderOverview() {
 
   const logEl = document.getElementById('globalLog');
   if (logEl) logEl.scrollTop = logEl.scrollHeight;
+
+  document.querySelectorAll('[data-route-link]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      setRoute(a.dataset.routeLink);
+    });
+  });
 }
 
 function renderRunningList() {
@@ -223,7 +247,8 @@ function renderTasks() {
     <div class="page-header">
       <div><h2>任务</h2><div class="sub">结构化巡检任务；默认新建标签页执行。</div></div>
       <div class="row">
-        <button class="primary" id="btnNewTask">新建任务</button>
+        <button class="primary" id="btnNewTask">+ 新建任务（AI 帮手）</button>
+        <button class="small ghost" id="btnNewTaskAdvanced">高级模式</button>
       </div>
     </div>
     <div id="taskList">
@@ -231,7 +256,8 @@ function renderTasks() {
     </div>
   `;
 
-  document.getElementById('btnNewTask').addEventListener('click', () => openTaskWizard(null));
+  document.getElementById('btnNewTask').addEventListener('click', () => openTaskAssistant());
+  document.getElementById('btnNewTaskAdvanced')?.addEventListener('click', () => openTaskWizard(null));
 
   for (const card of document.querySelectorAll('[data-task-id]')) {
     const id = card.dataset.taskId;
@@ -439,6 +465,7 @@ function renderSettings() {
   const d = cfg.defaultModel || {};
   const p = cfg.planningModel;
   const i = cfg.insightModel;
+  const presets = state.presets || [];
 
   contentEl.innerHTML = `
     <div class="page-header">
@@ -462,7 +489,15 @@ function renderSettings() {
 
     <div class="card">
       <h3>默认执行模型（必填 · 视觉多模态）</h3>
-      <p class="hint">用于元素定位以及未单独配置的其他意图。AGENTS.md 要求此模型不可缺省、不可用纯文本模型。</p>
+      <p class="hint">用于元素定位、AI 任务生成以及未单独配置的其他意图。豆包用户从下方下拉一键填充，再粘贴自己的 API Key 即可。</p>
+      <div class="row" style="gap:.5rem">
+        <select id="presetSelect" style="flex:1">
+          <option value="">— 选择一个模型预设以一键填充 —</option>
+          ${presets.map((p) => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('')}
+        </select>
+        <button class="small" id="btnApplyPreset">应用预设</button>
+      </div>
+      <div class="muted" id="presetDesc" style="margin:.4rem 0 .5rem"></div>
       <div class="row-2">
         <div><label class="field">API Key</label><input id="defApiKey" type="password" value="${escapeHtml(d.apiKey || '')}" /></div>
         <div><label class="field">Base URL</label><input id="defBaseUrl" type="url" value="${escapeHtml(d.baseUrl || '')}" /></div>
@@ -511,6 +546,24 @@ function renderSettings() {
       </div>
     </details>
   `;
+
+  const presetSelect = document.getElementById('presetSelect');
+  const presetDesc = document.getElementById('presetDesc');
+  presetSelect?.addEventListener('change', () => {
+    const sel = (state.presets || []).find((p) => p.id === presetSelect.value);
+    presetDesc.textContent = sel?.description || '';
+  });
+  document.getElementById('btnApplyPreset')?.addEventListener('click', () => {
+    const sel = (state.presets || []).find((p) => p.id === presetSelect.value);
+    if (!sel) {
+      presetDesc.textContent = '请先选择一个预设。';
+      return;
+    }
+    document.getElementById('defBaseUrl').value = sel.profile.baseUrl;
+    document.getElementById('defModelName').value = sel.profile.modelName;
+    document.getElementById('defModelFamily').value = sel.profile.modelFamily || '';
+    presetDesc.textContent = '已填入预设，请在 API Key 处粘贴你的密钥后点保存。';
+  });
 
   document.getElementById('btnSaveBridge').addEventListener('click', async () => {
     const port = Number.parseInt(document.getElementById('bridgePort').value, 10);
@@ -566,7 +619,173 @@ function renderSettings() {
   });
 }
 
-// -------------- Task Wizard (5 steps) --------------
+// -------------- Task Assistant (one-shot AI) --------------
+
+const ASSISTANT_EXAMPLES = [
+  '每 10 分钟巡检 https://admin.example.com/orders 的「今日订单数」，少于 10 单时报警',
+  '每 5 分钟看 https://crm.example.com/dashboard 的「待处理工单」是否大于 0，有就提醒我',
+  '检查报表页 https://bi.example.com/sales 是否能正常打开、是否还显示「最近 30 分钟成交额」',
+];
+
+function openTaskAssistant() {
+  let currentTask = null;
+  let abortCtrl = null;
+
+  const renderAssistant = (phase) => {
+    const examplesHtml = ASSISTANT_EXAMPLES
+      .map((s) => `<button class="small ghost" data-example="${escapeHtml(s)}">${escapeHtml(s)}</button>`)
+      .join('');
+
+    const summaryHtml = currentTask ? renderTaskSummary(currentTask) : '';
+
+    modalBox.innerHTML = `
+      <div class="modal-head">
+        <h3>新建任务 · AI 帮手</h3>
+        <button class="ghost" id="asstClose">关闭</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">用一句中文描述你想监控的页面与异常条件，AI 会帮你生成完整的巡检任务。</p>
+        <label class="field">任务描述</label>
+        <textarea id="asstPrompt" rows="4" placeholder="例如：每 10 分钟看一下 https://crm.example.com/dashboard 是否还能正常打开，并提取「今日订单数」，少于 10 单就提醒我"></textarea>
+        <div class="row" style="margin-top:.4rem;flex-wrap:wrap">
+          <span class="muted">试试这些：</span>
+          ${examplesHtml}
+        </div>
+        <div class="row" style="margin-top:.85rem">
+          <button class="primary" id="asstGenerate" ${phase === 'loading' ? 'disabled' : ''}>${phase === 'loading' ? 'AI 正在生成…' : '生成任务'}</button>
+          <button class="small" id="asstAdvanced">改用高级模式</button>
+          <span class="muted" id="asstHint"></span>
+        </div>
+
+        <div id="asstResult">${summaryHtml}</div>
+      </div>
+      <div class="modal-foot">
+        <span class="muted">${currentTask ? '可直接保存，也可微调 URL / 规则后再保存。' : '生成后可直接保存。'}</span>
+        <div class="row">
+          ${currentTask ? '<button class="small" id="asstOpenWizard">在向导里继续编辑</button>' : ''}
+          <button class="primary" id="asstSave" ${currentTask ? '' : 'disabled'}>保存任务</button>
+        </div>
+      </div>
+    `;
+    bindAssistant();
+  };
+
+  const bindAssistant = () => {
+    document.getElementById('asstClose').addEventListener('click', () => {
+      abortCtrl?.abort();
+      closeModal();
+    });
+    document.getElementById('asstAdvanced').addEventListener('click', () => {
+      closeModal();
+      openTaskWizard(null);
+    });
+    document.querySelectorAll('[data-example]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.getElementById('asstPrompt').value = btn.dataset.example;
+      });
+    });
+    document.getElementById('asstGenerate').addEventListener('click', async () => {
+      const desc = document.getElementById('asstPrompt').value.trim();
+      const hint = document.getElementById('asstHint');
+      if (!desc) {
+        hint.textContent = '请先输入任务描述';
+        return;
+      }
+      hint.textContent = '调用模型中…';
+      renderAssistant('loading');
+      try {
+        const res = await api.generateTask(desc);
+        if (!res?.ok) {
+          currentTask = null;
+          renderAssistant('idle');
+          document.getElementById('asstHint').textContent = res?.error || '生成失败';
+          return;
+        }
+        currentTask = res.task;
+        renderAssistant('done');
+      } catch (e) {
+        currentTask = null;
+        renderAssistant('idle');
+        document.getElementById('asstHint').textContent = e instanceof Error ? e.message : String(e);
+      }
+    });
+    document.getElementById('asstSave')?.addEventListener('click', async () => {
+      if (!currentTask) return;
+      await api.createTask(currentTask);
+      await refreshDataSilent();
+      closeModal();
+      setRoute('tasks');
+    });
+    document.getElementById('asstOpenWizard')?.addEventListener('click', () => {
+      const draft = currentTask;
+      closeModal();
+      openTaskWizard(null, draft);
+    });
+
+    // 编辑摘要里的 URL / 间隔
+    document.getElementById('asstUrl')?.addEventListener('input', (e) => {
+      if (currentTask) currentTask.entryUrl = e.target.value.trim();
+    });
+    document.getElementById('asstInterval')?.addEventListener('input', (e) => {
+      const v = Math.max(1, Number(e.target.value) || 10);
+      if (currentTask) currentTask.schedule.intervalMinutes = v;
+    });
+    document.getElementById('asstName')?.addEventListener('input', (e) => {
+      if (currentTask) currentTask.name = e.target.value;
+    });
+  };
+
+  openModalRaw();
+  renderAssistant('idle');
+}
+
+function renderTaskSummary(t) {
+  const ruleLines = (t.rules || []).map((r) => {
+    if (r.type === 'threshold') return `阈值：<code>${escapeHtml(r.field)}</code> ${escapeHtml(r.op)} ${escapeHtml(String(r.value))}（${r.severity}）`;
+    if (r.type === 'missing') return `缺失：<code>${escapeHtml(r.field)}</code>（${r.severity}）`;
+    return `表达式：<code>${escapeHtml(r.expression || '')}</code>（${r.severity}）`;
+  });
+  return `
+    <div class="card" style="margin-top:1rem">
+      <h3>AI 生成结果</h3>
+      <p class="hint">关键字段已可直接编辑；点「在向导里继续编辑」可逐步精调。</p>
+      <div class="row-2">
+        <div>
+          <label class="field">任务名称</label>
+          <input id="asstName" type="text" value="${escapeHtml(t.name)}" />
+        </div>
+        <div>
+          <label class="field">入口 URL</label>
+          <input id="asstUrl" type="url" value="${escapeHtml(t.entryUrl || '')}" placeholder="https://..." />
+        </div>
+      </div>
+      <div class="row-2">
+        <div>
+          <label class="field">运行模式</label>
+          <input value="${t.runMode === 'currentTab' ? 'currentTab（已打开页面）' : 'newTabWithUrl（自动开新标签页）'}" disabled />
+        </div>
+        <div>
+          <label class="field">巡检间隔（分钟）</label>
+          <input id="asstInterval" type="number" min="1" step="1" value="${t.schedule.intervalMinutes}" />
+        </div>
+      </div>
+      <label class="field">业务背景（AI 推断）</label>
+      <textarea rows="2" disabled>${escapeHtml(t.description || '（无）')}</textarea>
+      <label class="field">页面就绪条件</label>
+      <textarea rows="2" disabled>${escapeHtml(t.readyPrompt)}</textarea>
+      <label class="field">取数 Prompt</label>
+      <textarea rows="2" disabled>${escapeHtml(t.extractPrompt)}</textarea>
+      <label class="field">取数 Schema</label>
+      <textarea rows="2" disabled>${escapeHtml(t.extractSchema || '（未指定，模型自由返回）')}</textarea>
+      <label class="field">规则（${ruleLines.length} 条）</label>
+      <div class="muted" style="background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:.5rem .65rem">
+        ${ruleLines.length ? ruleLines.join('<br/>') : '（无规则；将默认仅校验「页面非登录页/非错误页」）'}
+      </div>
+    </div>
+  `;
+}
+
+// -------------- Task Wizard (5 steps, advanced) --------------
 
 const WIZARD_STEPS = [
   '连接与运行方式',
@@ -576,7 +795,7 @@ const WIZARD_STEPS = [
   '调度与告警',
 ];
 
-function openTaskWizard(taskId) {
+function openTaskWizard(taskId, draftStart) {
   const tpl = {
     name: '',
     systemName: '',
@@ -601,7 +820,8 @@ function openTaskWizard(taskId) {
     paused: false,
   };
   const existing = taskId ? state.tasks.find((t) => t.id === taskId) : null;
-  const draft = JSON.parse(JSON.stringify(existing || tpl));
+  const seed = existing || draftStart || tpl;
+  const draft = JSON.parse(JSON.stringify(seed));
   let step = 0;
 
   const renderStep = () => {
