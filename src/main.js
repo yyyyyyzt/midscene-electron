@@ -24,6 +24,7 @@ import { Scheduler } from './scheduler/scheduler.js';
 import { notify, openReport } from './alerts/notifier.js';
 import { runInspection } from './runtime/inspection-runner.js';
 import { generateTaskFromPrompt } from './runtime/task-generator.js';
+import { parseYamlFlow, describeFlow } from './runtime/yaml-flow.js';
 import { MODEL_PRESETS } from './store/model-presets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -226,10 +227,17 @@ ipcMain.handle('alert:update', (_e, { id, action, minutes }) =>
 
 ipcMain.handle('preset:list', () => MODEL_PRESETS);
 
-ipcMain.handle('task:generate', async (_e, { description }) => {
+ipcMain.handle('task:generate', async (_e, { description, flowYaml }) => {
   const cfg = loadConfig(userDataPath());
   return generateTaskFromPrompt({
     description: String(description || ''),
+    flowYaml: String(flowYaml || ''),
     profile: cfg.defaultModel,
   });
+});
+
+ipcMain.handle('yaml:parse', (_e, text) => {
+  const r = parseYamlFlow(String(text || ''));
+  if (!r.ok) return r;
+  return { ok: true, meta: r.meta, warnings: r.warnings, steps: describeFlow(r.flow) };
 });

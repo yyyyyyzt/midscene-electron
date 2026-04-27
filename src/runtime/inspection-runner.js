@@ -1,19 +1,22 @@
 import { createBridgeAgent } from './chrome-runner.js';
 import { evaluateRules } from './rule-engine.js';
+import { parseYamlFlow, buildRunnableYaml } from './yaml-flow.js';
 
 /**
  * 跑一次完整的巡检任务：
  *   1. 连接 Bridge（newTabWithUrl 默认 / currentTab 调试）
  *   2. aiWaitFor 页面就绪
- *   3. aiAssert 非登录页 / 非错误页
- *   4. aiQuery 提取结构化数据
- *   5. 规则引擎判断异常（按 when 决定是否触发告警）
- *   6. 汇总返回，包含每个 phase 的耗时与结果
+ *   3. （可选）执行用户提供的 YAML flow，做下拉/点击/滚动等复杂导航
+ *   4. aiAssert 非登录页 / 非错误页
+ *   5. aiQuery 提取结构化数据
+ *   6. 规则引擎判断异常（按 when 决定是否触发告警）
+ *   7. 汇总返回，包含每个 phase 的耗时与结果
  */
 
 const PHASE = {
   CONNECT: 'connect',
   READY: 'ready',
+  FLOW: 'flow',
   ASSERT: 'assertNotLogin',
   QUERY: 'extract',
   RULES: 'rules',
@@ -121,6 +124,32 @@ export async function runInspection(ctx) {
         skipPhase(PHASE.READY, '页面就绪 aiWaitFor', '未配置 readyPrompt');
       }
 
+      if (task.flowYaml && task.flowYaml.trim()) {
+        await runPhase(PHASE.FLOW, '操作流程 YAML', async () => {
+          const parsed = parseYamlFlow(task.flowYaml);
+          if (!parsed.ok) {
+            throw new Error(parsed.error);
+          }
+          if (parsed.warnings.length) {
+            for (const w of parsed.warnings) log(`flow 警告：${w}`);
+          }
+          const runnable = buildRunnableYaml(parsed.flow, task.name || '巡检流程');
+          log(`即将执行 ${parsed.flow.length} 步 flow（依赖 Midscene runYaml）…`);
+          if (typeof agent.runYaml !== 'function') {
+            throw new Error('当前 Midscene 版本不支持 agent.runYaml；请升级 @midscene/web');
+          }
+          const result = await agent.runYaml(runnable);
+          return {
+            steps: parsed.flow.length,
+            warnings: parsed.warnings,
+            yaml: runnable,
+            result: summarizeYamlResult(result),
+          };
+        });
+      } else {
+        skipPhase(PHASE.FLOW, '操作流程 YAML', '未配置 flowYaml');
+      }
+
       if (task.loginAssertPrompt?.trim()) {
         try {
           await runPhase(PHASE.ASSERT, '页面校验 aiAssert', async () => {
@@ -188,6 +217,18 @@ export async function runInspection(ctx) {
       }
     }
   })(), timeoutMs);
+}
+
+function summarizeYamlResult(result) {
+  if (!result || typeof result !== 'object') return null;
+  /** runYaml 通常返回 { result: { taskName: { stepName: value, ... } } }；保留浅拷贝以便记录 */
+  try {
+    const json = JSON.stringify(result);
+    if (json.length > 4000) return JSON.parse(json.slice(0, 0)) || { tooLarge: true };
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 /**
