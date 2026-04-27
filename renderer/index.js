@@ -23,6 +23,18 @@ function fmtTime(ts) {
   return d.toLocaleString();
 }
 
+function fmtCountdown(ts) {
+  if (!ts) return '-';
+  const diff = ts - Date.now();
+  if (diff <= 0) return '即将执行';
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `还有 ${sec} 秒`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `还有 ${min} 分钟`;
+  const hr = Math.floor(min / 60);
+  return `还有 ${hr} 小时 ${min % 60} 分`;
+}
+
 function fmtDuration(ms) {
   if (!ms && ms !== 0) return '-';
   if (ms < 1000) return `${ms}ms`;
@@ -153,8 +165,9 @@ function render() {
 
 function renderOverview() {
   const cfg = state.config;
-  const nextTask = [...state.tasks]
-    .filter((t) => !t.paused && t.schedule.enabled && t.nextRunAt)
+  const enabledTasks = state.tasks.filter((t) => !t.paused && t.schedule.enabled !== false);
+  const nextTask = [...enabledTasks]
+    .filter((t) => t.nextRunAt)
     .sort((a, b) => (a.nextRunAt || 0) - (b.nextRunAt || 0))[0];
 
   contentEl.innerHTML = `
@@ -171,27 +184,33 @@ function renderOverview() {
       </div>
       <div class="stat">
         <div class="label">任务总数 / 启用中</div>
-        <div class="value">${state.tasks.length} / ${state.tasks.filter((t) => !t.paused && t.schedule.enabled).length}</div>
+        <div class="value">${state.tasks.length} / ${enabledTasks.length}</div>
       </div>
       <div class="stat ${state.stats.todayAlerts > 0 ? 'warn' : 'ok'}">
         <div class="label">今日执行 / 异常 / 出错</div>
         <div class="value">${state.stats.todayCount} · ${state.stats.todayAlerts} · ${state.stats.todayErrors}</div>
       </div>
-      <div class="stat">
-        <div class="label">下次计划执行</div>
-        <div class="value" style="font-size:1rem">${nextTask ? escapeHtml(nextTask.name) : '-'}</div>
-        <div class="muted" style="margin-top:.35rem">${nextTask ? fmtTime(nextTask.nextRunAt) : '暂无计划'}</div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="card">
+        <h3>当前执行</h3>
+        ${renderRunningList()}
       </div>
-    </div>
-
-    <div class="card">
-      <h3>正在执行</h3>
-      ${renderRunningList()}
-    </div>
-
-    <div class="card">
-      <h3>最近执行记录</h3>
-      ${renderRunsTable(state.runs.slice(0, 8), true)}
+      <div class="card">
+        <h3>下一个计划执行</h3>
+        ${nextTask ? `
+          <div class="row" style="gap:.5rem;margin-bottom:.4rem">
+            <span class="status-pill ok">定时中</span>
+            <strong>${escapeHtml(nextTask.name)}</strong>
+          </div>
+          <dl class="kv">
+            <dt>计划时间</dt><dd>${fmtTime(nextTask.nextRunAt)}（${fmtCountdown(nextTask.nextRunAt)}）</dd>
+            <dt>系统</dt><dd>${escapeHtml(nextTask.systemName || '-')}</dd>
+            <dt>频率</dt><dd>每 ${nextTask.schedule.intervalMinutes} 分钟（${nextTask.schedule.activeFrom}-${nextTask.schedule.activeTo}）</dd>
+          </dl>
+        ` : '<div class="muted">暂无启用中的任务计划。</div>'}
+      </div>
     </div>
 
     <div class="card">
@@ -273,9 +292,11 @@ function renderTasks() {
       await api.runTaskNow(id);
     });
     card.querySelector('[data-action="edit"]')?.addEventListener('click', () => openTaskWizard(id));
-    card.querySelector('[data-action="pause"]')?.addEventListener('click', async () => {
+    card.querySelector('[data-action="toggle"]')?.addEventListener('click', async () => {
       const t = state.tasks.find((x) => x.id === id);
-      if (t) await api.pauseTask(id, !t.paused);
+      if (!t) return;
+      const willEnable = t.paused || t.schedule.enabled === false;
+      await api.pauseTask(id, !willEnable);
       await refreshDataSilent();
       render();
     });
@@ -294,12 +315,14 @@ function renderTasks() {
 
 function renderTaskCard(t) {
   const interval = t.schedule.intervalMinutes;
+  const scheduleEnabled = t.schedule.enabled !== false && !t.paused;
   return `
   <div class="task-card" data-task-id="${t.id}">
     <div>
       <div class="row" style="gap:.4rem">
         <span class="title">${escapeHtml(t.name)}</span>
-        ${t.paused ? '<span class="status-pill paused">已暂停</span>' : statusPill(t.lastStatus)}
+        ${scheduleEnabled ? '<span class="status-pill ok">定时中</span>' : '<span class="status-pill paused">已暂停</span>'}
+        ${statusPill(t.lastStatus)}
       </div>
       <div class="meta">
         <span>系统：${escapeHtml(t.systemName || '-')}</span>
@@ -308,14 +331,14 @@ function renderTaskCard(t) {
         <span>规则数：${t.rules?.length || 0}</span>
         ${t.flowYaml ? `<span>📜 含 ${t.flowSource === 'playwright' ? 'PW' : t.flowSource === 'yaml' ? 'YAML' : '操作'} 流程</span>` : ''}
         <span>上次：${fmtTime(t.lastRunAt)}</span>
-        <span>下次：${fmtTime(t.nextRunAt)}</span>
+        <span>下次：${scheduleEnabled ? fmtTime(t.nextRunAt) : '-'}</span>
       </div>
     </div>
     <div class="row">
-      <button class="small" data-action="run">立即执行</button>
+      <button class="small primary" data-action="run">测试执行一次</button>
+      <button class="small" data-action="toggle">${scheduleEnabled ? '暂停定时' : '开启定时'}</button>
       <button class="small" data-action="edit">编辑</button>
       <button class="small" data-action="runs">记录</button>
-      <button class="small" data-action="pause">${t.paused ? '恢复' : '暂停'}</button>
       <button class="small danger ghost" data-action="delete">删除</button>
     </div>
   </div>`;

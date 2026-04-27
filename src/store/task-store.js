@@ -200,6 +200,15 @@ export function createTask(userDataPath, input) {
     createdAt: now(),
     updatedAt: now(),
   });
+  // 保存任务后不要立即执行：把下次执行时间预设为「现在 + intervalMinutes」。
+  // 新任务默认 paused=true，由用户手动开启定时（或用「测试执行一次」走 enqueueNow）。
+  if (!task.nextRunAt) {
+    const interval = Math.max(1, Number(task.schedule?.intervalMinutes) || 10);
+    task.nextRunAt = Date.now() + interval * 60_000;
+  }
+  if (input.paused === undefined) {
+    task.paused = true;
+  }
   all.push(task);
   saveAllTasks(userDataPath, all);
   return task;
