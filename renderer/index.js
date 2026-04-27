@@ -298,7 +298,7 @@ function renderTaskCard(t) {
         <span>模式：${t.runMode === 'currentTab' ? 'currentTab（调试）' : 'newTabWithUrl'}</span>
         <span>频率：每 ${interval} 分钟（${t.schedule.activeFrom}-${t.schedule.activeTo}）</span>
         <span>规则数：${t.rules?.length || 0}</span>
-        ${t.flowYaml ? '<span>📜 含 YAML 流程</span>' : ''}
+        ${t.flowYaml ? `<span>📜 含 ${t.flowSource === 'playwright' ? 'PW' : t.flowSource === 'yaml' ? 'YAML' : '操作'} 流程</span>` : ''}
         <span>上次：${fmtTime(t.lastRunAt)}</span>
         <span>下次：${fmtTime(t.nextRunAt)}</span>
       </div>
@@ -392,8 +392,16 @@ function renderPhaseTimeline(phases) {
         if (p.name === 'connect') detail = `${escapeHtml(p.detail.runMode)} · ${escapeHtml(p.detail.entryUrl || '当前标签')}`;
         else if (p.name === 'extract') detail = `<details class="collapse"><summary>查看提示词与返回</summary><div class="collapse-body"><label class="field">prompt</label><pre class="log">${escapeHtml(p.detail.prompt || '')}</pre><label class="field">value</label><pre class="log">${escapeHtml(JSON.stringify(p.detail.value, null, 2))}</pre></div></details>`;
         else if (p.name === 'flow') {
+          const sr = p.detail.stepResults || [];
+          const ok = sr.filter((s) => s.status === 'ok').length;
+          const recovered = sr.filter((s) => s.status === 'recovered').length;
+          const failed = sr.filter((s) => s.status === 'error').length;
           const w = (p.detail.warnings || []).length ? '；警告: ' + p.detail.warnings.join('；') : '';
-          detail = `重放 ${p.detail.steps} 步${w}` + (p.detail.yaml ? `<details class="collapse"><summary>查看 YAML</summary><div class="collapse-body"><pre class="log">${escapeHtml(p.detail.yaml)}</pre></div></details>` : '');
+          const head = `<div>${p.detail.source === 'playwright' ? 'Playwright' : 'YAML'} · 重放 ${p.detail.total} 步：通过 ${ok}${recovered ? `（兜底 ${recovered}）` : ''} / 失败 ${failed}${w}</div>`;
+          const body = sr.length
+            ? `<details class="collapse"><summary>查看每一步</summary><div class="collapse-body">${renderStepResults(sr)}</div></details>`
+            : '';
+          detail = head + body;
         }
         else if (p.name === 'rules') detail = `${p.detail.total} 条规则，触发 ${p.detail.triggered?.length || 0} 条`;
         else if (p.detail.prompt) detail = escapeHtml(p.detail.prompt);
@@ -459,10 +467,30 @@ function buildRunMarkdown(rec) {
       if (p.name === 'connect') note = `${p.detail.runMode} ${p.detail.entryUrl || ''}`;
       else if (p.name === 'extract') note = `prompt 字数=${(p.detail.prompt || '').length}`;
       else if (p.name === 'rules') note = `${p.detail.total} 条，触发 ${p.detail.triggered?.length || 0}`;
+      else if (p.name === 'flow') {
+        const sr = p.detail.stepResults || [];
+        const ok = sr.filter((s) => s.status === 'ok').length;
+        const recv = sr.filter((s) => s.status === 'recovered').length;
+        const fail = sr.filter((s) => s.status === 'error').length;
+        note = `${p.detail.source} · ${p.detail.total} 步 · ok=${ok} recovered=${recv} failed=${fail}`;
+      }
     }
     lines.push(`| ${p.label} | ${p.status} | ${p.durationMs} ms | ${note.replace(/\|/g, '\\|')} |`);
   }
   lines.push('');
+
+  const flowPhase = (rec.phases || []).find((p) => p.name === 'flow');
+  if (flowPhase?.detail?.stepResults?.length) {
+    lines.push('## 操作流程逐步结果');
+    lines.push('| # | 动作 | 定位 / 内容 | 状态 | 耗时 | 错误 |');
+    lines.push('|---|---|---|---|---|---|');
+    for (const s of flowPhase.detail.stepResults) {
+      const desc = (s.description || '').replace(/\|/g, '\\|');
+      const err = (s.error || '').replace(/\|/g, '\\|');
+      lines.push(`| ${s.index + 1} | ${s.action} | ${desc} | ${s.status} | ${s.durationMs} ms | ${err} |`);
+    }
+    lines.push('');
+  }
   lines.push('## 提取结果');
   lines.push('```json');
   lines.push(JSON.stringify(rec.extracted, null, 2));
@@ -789,12 +817,12 @@ function openTaskAssistant() {
         </div>
 
         <details class="collapse" style="margin-top:.85rem" ${lastYaml ? 'open' : ''}>
-          <summary>📜 操作流程 YAML（可选 · 来自 Midscene 扩展的 Recorder）</summary>
+          <summary>📜 操作流程（可选 · 粘贴 Recorder 输出的 YAML 或 Playwright 代码）</summary>
           <div class="collapse-body">
-            <p class="hint">复杂交互（下拉、滚动、跨标签页跳转）建议用 Recorder 录制好再粘贴在这里；其余字段（提取 / 规则 / 调度）仍由 AI 自动生成。</p>
-            <textarea id="asstYaml" rows="8" placeholder="web:&#10;  url: https://...&#10;tasks:&#10;  - name: ...&#10;    flow:&#10;      - aiTap: ...&#10;      - aiScroll: ...">${escapeHtml(lastYaml)}</textarea>
+            <p class="hint">复杂交互（下拉、滚动、跨标签页跳转）建议用 Midscene 扩展的 Recorder 录制好再粘贴。系统会按录制顺序逐步重放，每步实时上报；某一步失败时可启用 AI 兜底。</p>
+            <textarea id="asstYaml" rows="8" placeholder="可粘贴 Recorder 的 YAML 或 Playwright 代码 — 系统会自动识别格式">${escapeHtml(lastYaml)}</textarea>
             <div class="row" style="margin-top:.4rem">
-              <button class="small" id="asstYamlPreview">解析并预览</button>
+              <button class="small" id="asstYamlPreview">解析并预览步骤</button>
               <span class="muted" id="asstYamlHint"></span>
             </div>
             <div id="asstYamlSteps">${yamlPreview ? renderFlowSteps(yamlPreview) : ''}</div>
@@ -839,7 +867,7 @@ function openTaskAssistant() {
       const hint = document.getElementById('asstYamlHint');
       const stepsBox = document.getElementById('asstYamlSteps');
       if (!txt) { hint.textContent = '请先粘贴 YAML'; stepsBox.innerHTML = ''; return; }
-      const r = await api.parseYaml(txt);
+      const r = await api.parseFlow(txt);
       if (!r.ok) {
         hint.textContent = r.error || '解析失败';
         stepsBox.innerHTML = '';
@@ -848,7 +876,8 @@ function openTaskAssistant() {
       }
       yamlPreview = r.steps;
       const meta = r.meta || {};
-      hint.textContent = `共 ${r.steps.length} 步${meta.entryUrl ? ' · ' + meta.entryUrl : ''}${r.warnings?.length ? ' · ' + r.warnings.join('；') : ''}`;
+      const sourceLabel = r.source === 'playwright' ? 'Playwright 代码' : 'YAML';
+      hint.textContent = `识别为 ${sourceLabel}，共 ${r.steps.length} 步${meta.entryUrl ? ' · ' + meta.entryUrl : ''}${r.warnings?.length ? ' · ' + r.warnings.join('；') : ''}`;
       stepsBox.innerHTML = renderFlowSteps(r.steps);
     });
     document.getElementById('asstGenerate').addEventListener('click', async () => {
@@ -908,6 +937,23 @@ function openTaskAssistant() {
 
   openModalRaw();
   renderAssistant('idle');
+}
+
+function renderStepResults(steps) {
+  return `<table class="table" style="margin-top:.35rem">
+    <thead><tr><th style="width:48px">#</th><th style="width:130px">动作</th><th>定位 / 内容</th><th style="width:90px">状态</th><th style="width:80px">耗时</th></tr></thead>
+    <tbody>${steps.map((s) => {
+      const cls = s.status === 'ok' ? 'ok' : s.status === 'recovered' ? 'ack' : 'err';
+      const label = s.status === 'ok' ? '通过' : s.status === 'recovered' ? '兜底通过' : '失败';
+      return `<tr>
+        <td>${s.index + 1}</td>
+        <td><span class="status-pill paused">${escapeHtml(s.action)}</span></td>
+        <td>${escapeHtml(s.description || '')}${s.error ? `<div class="muted" style="margin-top:.25rem">原始错误：${escapeHtml(s.error)}</div>` : ''}${s.recoveredError ? `<div class="muted" style="margin-top:.25rem">兜底错误：${escapeHtml(s.recoveredError)}</div>` : ''}</td>
+        <td><span class="status-pill ${cls}">${label}</span></td>
+        <td>${fmtDuration(s.durationMs)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
 }
 
 function renderFlowSteps(steps) {
@@ -1126,15 +1172,19 @@ function renderWizardBody(step, d) {
       <textarea id="f_readyPrompt" rows="2">${escapeHtml(d.readyPrompt)}</textarea>
 
       <details class="collapse" style="margin-top:.6rem" ${d.flowYaml ? 'open' : ''}>
-        <summary>📜 操作流程 YAML（可选 · 适合下拉/滚动/点击等复杂导航）</summary>
+        <summary>📜 操作流程（可选 · YAML 或 Playwright 代码，适合下拉/滚动/复杂导航）</summary>
         <div class="collapse-body">
-          <p class="hint">用 Midscene Chrome 扩展的 Recorder 录制好 YAML，粘贴在这里。执行时会先按 YAML 操作页面，再执行下方的取数与规则。</p>
-          <textarea id="f_flowYaml" rows="10" placeholder="web:&#10;  url: https://...&#10;tasks:&#10;  - name: ...&#10;    flow:&#10;      - aiTap: ...&#10;      - aiScroll: ...">${escapeHtml(d.flowYaml || '')}</textarea>
+          <p class="hint">用 Midscene 扩展 Recorder 录制后，YAML 或 Playwright 代码任选一种粘贴。执行时按录制顺序<strong>逐步重放</strong>，并实时上报每步的状态与耗时；下方可开启 AI 兜底。</p>
+          <textarea id="f_flowYaml" rows="10" placeholder="粘贴 YAML 或 Playwright 代码 — 系统会自动识别">${escapeHtml(d.flowYaml || '')}</textarea>
           <div class="row" style="margin-top:.4rem">
-            <button class="small" type="button" id="wzYamlPreview">解析并预览</button>
+            <button class="small" type="button" id="wzYamlPreview">解析并预览步骤</button>
             <span class="muted" id="wzYamlHint"></span>
           </div>
           <div id="wzYamlSteps"></div>
+          <label class="toggle" style="margin-top:.6rem">
+            <input id="f_aiFallback" type="checkbox" ${d.aiFallback !== false ? 'checked' : ''} />
+            某一步失败时自动用 aiAct 兜底（推荐开启）
+          </label>
         </div>
       </details>
 
@@ -1235,14 +1285,15 @@ function bindStepInputs(step, d) {
       const hint = document.getElementById('wzYamlHint');
       const stepsBox = document.getElementById('wzYamlSteps');
       if (!txt) { hint.textContent = '请先粘贴 YAML'; stepsBox.innerHTML = ''; return; }
-      const r = await api.parseYaml(txt);
+      const r = await api.parseFlow(txt);
       if (!r.ok) {
         hint.textContent = r.error || '解析失败';
         stepsBox.innerHTML = '';
         return;
       }
       const meta = r.meta || {};
-      hint.textContent = `共 ${r.steps.length} 步${meta.entryUrl ? ' · ' + meta.entryUrl : ''}${r.warnings?.length ? ' · ' + r.warnings.join('；') : ''}`;
+      const sourceLabel = r.source === 'playwright' ? 'Playwright 代码' : 'YAML';
+      hint.textContent = `识别为 ${sourceLabel}，共 ${r.steps.length} 步${meta.entryUrl ? ' · ' + meta.entryUrl : ''}${r.warnings?.length ? ' · ' + r.warnings.join('；') : ''}`;
       stepsBox.innerHTML = renderFlowSteps(r.steps);
     });
   }
@@ -1290,6 +1341,8 @@ function readStep(step, d, strict) {
     d.extractPrompt = document.getElementById('f_extractPrompt').value;
     d.extractSchema = document.getElementById('f_extractSchema').value;
     d.flowYaml = document.getElementById('f_flowYaml')?.value ?? d.flowYaml ?? '';
+    const fb = document.getElementById('f_aiFallback');
+    if (fb) d.aiFallback = fb.checked;
   } else if (step === 3) {
     const rows = document.querySelectorAll('#rulesBox [data-rule-id]');
     const rules = [];

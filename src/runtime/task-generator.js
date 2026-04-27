@@ -9,7 +9,7 @@
  */
 
 import { taskTemplate } from '../store/task-store.js';
-import { parseYamlFlow, describeFlow } from './yaml-flow.js';
+import { parseFlowInput, describeFlow } from './yaml-flow.js';
 
 /** 系统提示词，约束模型严格按 schema 返回 JSON。 */
 const SYSTEM_PROMPT = `你是一个浏览器巡检任务生成助手。
@@ -100,18 +100,21 @@ export async function generateTaskFromPrompt(input) {
     return { ok: false, error: '请输入任务描述或粘贴 Recorder YAML。' };
   }
 
-  /** 校验并提取 yaml meta，提前阻断错误 yaml 进入模型 */
+  /** 校验并提取 meta，提前阻断错误代码进入模型 */
   /** @type {{viewportWidth?:number; viewportHeight?:number; entryUrl?:string} | null} */
-  let yamlMeta = null;
+  let flowMeta = null;
   /** @type {any[]} */
-  let yamlFlow = [];
+  let flowSteps = [];
+  /** @type {'yaml' | 'playwright' | null} */
+  let flowSource = null;
   if (yamlText) {
-    const r = parseYamlFlow(yamlText);
+    const r = parseFlowInput(yamlText);
     if (!r.ok) {
-      return { ok: false, error: `YAML 解析失败：${r.error}` };
+      return { ok: false, error: `操作流程解析失败：${r.error}` };
     }
-    yamlMeta = r.meta;
-    yamlFlow = r.flow;
+    flowMeta = r.meta;
+    flowSteps = r.steps;
+    flowSource = r.source;
   }
   const apiKey = (profile.apiKey || '').trim();
   const baseUrl = (profile.baseUrl || '').trim().replace(/\/+$/, '');
@@ -128,10 +131,11 @@ export async function generateTaskFromPrompt(input) {
   const userParts = [];
   if (description?.trim()) userParts.push(`用户描述：\n${description.trim()}`);
   if (yamlText) {
+    const label = flowSource === 'playwright' ? 'Recorder Playwright 代码' : 'Recorder YAML';
     userParts.push(
-      `用户附带的 Midscene Recorder YAML（不要原样复制；只用来推断 entryUrl 与提取目标）：\n${yamlText}`,
+      `用户附带的 ${label}（不要原样复制；只用来推断 entryUrl 与提取目标。这部分内容会由系统逐步重放）：\n${yamlText}`,
     );
-    if (yamlMeta?.entryUrl) userParts.push(`已确认 entryUrl = ${yamlMeta.entryUrl}`);
+    if (flowMeta?.entryUrl) userParts.push(`已确认 entryUrl = ${flowMeta.entryUrl}`);
   }
   const body = {
     model: modelName,
@@ -197,12 +201,14 @@ export async function generateTaskFromPrompt(input) {
   const task = mergeWithTemplate(parsed);
   if (yamlText) {
     task.flowYaml = yamlText;
-    if (!task.entryUrl && yamlMeta?.entryUrl) task.entryUrl = yamlMeta.entryUrl;
+    task.flowSource = flowSource || 'auto';
+    if (!task.entryUrl && flowMeta?.entryUrl) task.entryUrl = flowMeta.entryUrl;
   }
   return {
     ok: true,
     task,
-    flowSummary: yamlFlow.length ? describeFlow(yamlFlow) : undefined,
+    flowSummary: flowSteps.length ? describeFlow(flowSteps) : undefined,
+    flowSource,
   };
 }
 

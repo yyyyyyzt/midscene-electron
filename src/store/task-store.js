@@ -39,6 +39,8 @@ const LEGACY_RECIPE = 'task-recipe.json';
  *   extractSchema: string;
  *   loginAssertPrompt: string;
  *   flowYaml: string;
+ *   flowSource: 'playwright' | 'yaml' | 'auto' | 'none';
+ *   aiFallback: boolean;
  *   rules: RuleDef[];
  *   schedule: {
  *     enabled: boolean;
@@ -74,6 +76,8 @@ const TEMPLATE = {
   extractSchema: '',
   loginAssertPrompt: '当前页面是业务后台页面，不是登录页、错误页、空白页',
   flowYaml: '',
+  flowSource: 'auto',
+  aiFallback: true,
   rules: [],
   schedule: {
     enabled: true,

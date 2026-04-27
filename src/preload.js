@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   listPresets: () => ipcRenderer.invoke('preset:list'),
   generateTask: (description, flowYaml) =>
     ipcRenderer.invoke('task:generate', { description, flowYaml }),
-  parseYaml: (text) => ipcRenderer.invoke('yaml:parse', text),
+  parseFlow: (text) => ipcRenderer.invoke('flow:parse', text),
 
   onSchedulerEvent: (cb) => {
     const listener = (_e, payload) => cb(payload);
