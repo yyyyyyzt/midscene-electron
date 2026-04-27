@@ -36,6 +36,9 @@
 
 - [x] 导航：总览 / 任务 / 执行记录 / 告警 / 设置。
 - [x] AI 帮手 `task-generator.js` + 5 步向导；模型预设与高级 Planning / Insight。
+- [ ] 下一步 UI 布局：任务编辑页拆成「基础信息 / 进入目标状态 / 取数配置 / 规则与告警 / 调试预览」分区，避免把开发者取数、Recorder 和 `aiQuery` 混在一个大表单里。
+- [ ] 开发者取数 UI：请求配置、页面脚本、字段映射、测试结果四块上下文关联展示。
+- [ ] 执行详情 UI：按阶段展示 connect / flow / extract / rules，并在 extract 阶段区分接口 JSON、页面脚本、`aiQuery` 来源。
 
 ### 取数策略
 
