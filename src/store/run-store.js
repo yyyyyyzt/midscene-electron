@@ -153,6 +153,58 @@ export function listRecentRuns(userDataPath, taskId, limit = 50) {
 }
 
 /**
+ * 删除指定的若干条执行记录。
+ *
+ * @param {string} userDataPath
+ * @param {string[]} runIds
+ */
+export function deleteRuns(userDataPath, runIds) {
+  if (!Array.isArray(runIds) || runIds.length === 0) return { ok: true, deleted: 0 };
+  const idx = loadIndex(userDataPath);
+  const set = new Set(runIds);
+  let deleted = 0;
+  for (const taskId of Object.keys(idx)) {
+    const before = idx[taskId];
+    const after = before.filter((rid) => !set.has(rid));
+    if (after.length !== before.length) {
+      idx[taskId] = after;
+    }
+  }
+  for (const rid of runIds) {
+    try {
+      fs.rmSync(runFilePath(userDataPath, rid), { force: true });
+      deleted++;
+    } catch {}
+  }
+  saveIndex(userDataPath, idx);
+  return { ok: true, deleted };
+}
+
+/**
+ * 清空所有执行记录（可选只清某个任务）。
+ *
+ * @param {string} userDataPath
+ * @param {string | null} [taskId]
+ */
+export function clearRuns(userDataPath, taskId) {
+  const idx = loadIndex(userDataPath);
+  /** @type {string[]} */
+  let toRemove = [];
+  if (taskId) {
+    toRemove = idx[taskId] || [];
+    delete idx[taskId];
+  } else {
+    for (const list of Object.values(idx)) toRemove.push(...list);
+    for (const k of Object.keys(idx)) delete idx[k];
+  }
+  for (const rid of toRemove) {
+    try { fs.rmSync(runFilePath(userDataPath, rid), { force: true }); } catch {}
+  }
+  saveIndex(userDataPath, idx);
+  return { ok: true, deleted: toRemove.length };
+}
+
+/**
  * 统计数据。
  * @param {string} userDataPath
  */

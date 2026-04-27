@@ -15,17 +15,20 @@ import {
   listRecentRuns,
   getRun,
   stats,
+  deleteRuns,
+  clearRuns,
 } from './store/run-store.js';
 import {
   listAlerts,
   updateAlertState,
+  deleteAlerts,
+  clearAlerts,
 } from './store/alert-store.js';
 import { Scheduler } from './scheduler/scheduler.js';
 import { notify, openReport } from './alerts/notifier.js';
 import { runInspection } from './runtime/inspection-runner.js';
 import { generateTaskFromPrompt } from './runtime/task-generator.js';
 import { parseFlowInput, describeFlow } from './runtime/yaml-flow.js';
-import { MODEL_PRESETS } from './store/model-presets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -219,13 +222,15 @@ ipcMain.handle('run:openReport', (_e, p) => {
   return { ok: true };
 });
 ipcMain.handle('run:stats', () => stats(userDataPath()));
+ipcMain.handle('run:delete', (_e, runIds) => deleteRuns(userDataPath(), runIds || []));
+ipcMain.handle('run:clear', (_e, taskId) => clearRuns(userDataPath(), taskId || null));
 
 ipcMain.handle('alert:list', () => listAlerts(userDataPath()));
 ipcMain.handle('alert:update', (_e, { id, action, minutes }) =>
   updateAlertState(userDataPath(), id, action, minutes),
 );
-
-ipcMain.handle('preset:list', () => MODEL_PRESETS);
+ipcMain.handle('alert:delete', (_e, ids) => deleteAlerts(userDataPath(), ids || []));
+ipcMain.handle('alert:clear', (_e, scope) => clearAlerts(userDataPath(), scope || 'all'));
 
 ipcMain.handle('task:generate', async (_e, { description, flowYaml }) => {
   const cfg = loadConfig(userDataPath());

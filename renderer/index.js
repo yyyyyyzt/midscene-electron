@@ -111,20 +111,18 @@ api.onSchedulerEvent(async (evt) => {
 
 async function refreshDataSilent() {
   try {
-    const [tasks, runs, st, alerts, cfg, presets] = await Promise.all([
+    const [tasks, runs, st, alerts, cfg] = await Promise.all([
       api.listTasks(),
       api.listRuns(null, 30),
       api.stats(),
       api.listAlerts(),
       api.loadConfig(),
-      state.presets ? Promise.resolve(state.presets) : api.listPresets(),
     ]);
     state.tasks = tasks || [];
     state.runs = runs || [];
     state.stats = st || state.stats;
     state.alerts = alerts || [];
     state.config = cfg;
-    state.presets = presets || [];
     updateBadges();
   } catch (e) {
     console.error(e);
@@ -159,25 +157,11 @@ function renderOverview() {
     .filter((t) => !t.paused && t.schedule.enabled && t.nextRunAt)
     .sort((a, b) => (a.nextRunAt || 0) - (b.nextRunAt || 0))[0];
 
-  const needSetup = !cfg?.defaultModel?.apiKey;
-  const noTask = state.tasks.length === 0;
-
   contentEl.innerHTML = `
     <div class="page-header">
       <div><h2>总览</h2><div class="sub">专用值守电脑的巡检状态一览</div></div>
+      <div class="row"><button class="small" id="btnOnboarding">新手引导</button></div>
     </div>
-
-    ${needSetup || noTask ? `
-      <div class="card">
-        <h3>新手指引</h3>
-        <ol class="muted" style="padding-left:1.2rem;line-height:1.9">
-          <li>在桌面 Chrome 安装 <a href="https://midscenejs.com/bridge-mode" target="_blank" rel="noreferrer">Midscene 扩展</a> 并切到 Bridge 模式。</li>
-          <li>${needSetup ? '<a href="#" data-route-link="settings">前往「设置」</a> 选择「豆包预设」并粘贴 API Key。' : '<span class="muted">设置：默认模型已就绪。</span>'}</li>
-          <li>${noTask ? '<a href="#" data-route-link="tasks">前往「任务」</a> 点「新建任务（AI 帮手）」，用一句话描述要监控什么。' : '<span class="muted">任务：已有 ' + state.tasks.length + ' 个任务。</span>'}</li>
-          <li>在桌面 Chrome 中手工登录目标系统，让扩展点击「允许连接」即可。</li>
-        </ol>
-      </div>
-    ` : ''}
 
     <div class="grid">
       <div class="stat">
@@ -219,11 +203,35 @@ function renderOverview() {
   const logEl = document.getElementById('globalLog');
   if (logEl) logEl.scrollTop = logEl.scrollHeight;
 
-  document.querySelectorAll('[data-route-link]').forEach((a) => {
-    a.addEventListener('click', (e) => {
-      e.preventDefault();
-      setRoute(a.dataset.routeLink);
-    });
+  document.getElementById('btnOnboarding')?.addEventListener('click', () => {
+    openOnboardingModal();
+  });
+}
+
+function openOnboardingModal() {
+  const cfg = state.config || {};
+  const needSetup = !cfg?.defaultModel?.apiKey;
+  const noTask = state.tasks.length === 0;
+  openModal({
+    title: '新手引导',
+    body: `
+      <ol style="padding-left:1.2rem;line-height:1.95">
+        <li>在桌面 Chrome 安装 <a href="https://midscenejs.com/bridge-mode" target="_blank" rel="noreferrer">Midscene 扩展</a> 并切到 Bridge 模式。</li>
+        <li>${needSetup ? '<a href="#" data-route-link="settings">前往「设置」</a> 填写默认执行模型（API Key / Base URL / 模型名 / Family）。豆包接入：Base URL <code>https://ark.cn-beijing.volces.com/api/v3</code>，Model 例如 <code>doubao-seed-2-0-mini-260215</code>，Family <code>doubao-seed</code>。' : '<span class="muted">设置：默认模型已就绪。</span>'}</li>
+        <li>${noTask ? '<a href="#" data-route-link="tasks">前往「任务」</a> 点「新建任务（AI 帮手）」，用一句话描述要监控什么；如有复杂操作可在 Recorder 录制后粘贴 YAML / Playwright 代码。' : '<span class="muted">任务：已有 ' + state.tasks.length + ' 个任务。</span>'}</li>
+        <li>在桌面 Chrome 中手工登录目标系统，让扩展点击「允许连接」即可。</li>
+        <li>回到本工具点「立即执行」或等待调度触发，结果会写到执行记录与告警中心。</li>
+      </ol>
+    `,
+    onRender: () => {
+      document.querySelectorAll('[data-route-link]').forEach((a) => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          closeModal();
+          setRoute(a.dataset.routeLink);
+        });
+      });
+    },
   });
 }
 
@@ -321,12 +329,19 @@ function renderRuns() {
     ? state.tasks.find((t) => t.id === state.filterTaskId)?.name || ''
     : '';
 
+  if (!state.runSelection) state.runSelection = new Set();
+  // 清掉不在当前列表的选项
+  const visibleIds = new Set(runs.map((r) => r.id));
+  for (const id of [...state.runSelection]) if (!visibleIds.has(id)) state.runSelection.delete(id);
+
   contentEl.innerHTML = `
     <div class="page-header">
       <div><h2>执行记录</h2><div class="sub">${filtered ? `筛选：${escapeHtml(filtered)}` : '最近 30 条所有任务执行'}</div></div>
       <div class="row">
         ${state.filterTaskId ? `<button class="small" id="btnClearFilter">清除筛选</button>` : ''}
         <button class="small" id="btnRefreshRuns">刷新</button>
+        <button class="small danger ghost" id="btnDeleteSelectedRuns" ${state.runSelection.size ? '' : 'disabled'}>删除所选 (<span id="runSelCount">${state.runSelection.size}</span>)</button>
+        <button class="small danger ghost" id="btnClearRuns">${state.filterTaskId ? '清空当前任务记录' : '清空全部记录'}</button>
       </div>
     </div>
     ${renderRunsTable(runs, false)}
@@ -334,6 +349,7 @@ function renderRuns() {
 
   document.getElementById('btnClearFilter')?.addEventListener('click', () => {
     state.filterTaskId = null;
+    state.runSelection = new Set();
     render();
   });
   document.getElementById('btnRefreshRuns')?.addEventListener('click', async () => {
@@ -347,12 +363,55 @@ function renderRuns() {
   for (const btn of document.querySelectorAll('[data-run-report]')) {
     btn.addEventListener('click', () => api.openReport(btn.dataset.runReport));
   }
+
+  document.querySelectorAll('[data-run-check]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.runCheck;
+      if (cb.checked) state.runSelection.add(id);
+      else state.runSelection.delete(id);
+      const c = document.getElementById('runSelCount');
+      if (c) c.textContent = String(state.runSelection.size);
+      const del = document.getElementById('btnDeleteSelectedRuns');
+      if (del) del.disabled = state.runSelection.size === 0;
+      const head = document.getElementById('runCheckAll');
+      if (head) head.checked = runs.length > 0 && runs.every((r) => state.runSelection.has(r.id));
+    });
+  });
+
+  document.getElementById('runCheckAll')?.addEventListener('change', (e) => {
+    if (e.target.checked) for (const r of runs) state.runSelection.add(r.id);
+    else state.runSelection.clear();
+    render();
+  });
+
+  document.getElementById('btnDeleteSelectedRuns')?.addEventListener('click', async () => {
+    const ids = [...state.runSelection];
+    if (!ids.length) return;
+    if (!confirm(`确认删除选中的 ${ids.length} 条执行记录？`)) return;
+    await api.deleteRuns(ids);
+    state.runSelection = new Set();
+    await refreshDataSilent();
+    render();
+  });
+
+  document.getElementById('btnClearRuns')?.addEventListener('click', async () => {
+    const scope = state.filterTaskId ? '当前任务' : '全部';
+    if (!confirm(`确认清空${scope}的执行记录？此操作不可撤销。`)) return;
+    await api.clearRuns(state.filterTaskId || null);
+    state.runSelection = new Set();
+    await refreshDataSilent();
+    render();
+  });
 }
 
 function renderRunsTable(runs, compact) {
   if (!runs.length) return '<div class="empty">暂无执行记录。</div>';
+  const showCheck = !compact;
+  const selection = state.runSelection || new Set();
+  const allChecked = runs.length > 0 && runs.every((r) => selection.has(r.id));
   return `<table class="table">
     <thead><tr>
+      ${showCheck ? `<th style="width:32px"><input type="checkbox" id="runCheckAll" ${allChecked ? 'checked' : ''} /></th>` : ''}
       <th>任务</th><th>开始</th><th>耗时</th><th>状态</th><th>规则</th><th></th>
     </tr></thead>
     <tbody>
@@ -362,7 +421,9 @@ function renderRunsTable(runs, compact) {
         const tCell = total
           ? (triggered ? `<span class="status-pill alert">${triggered} / ${total} 触发</span>` : `<span class="status-pill ok">${total} 条 全部未触发</span>`)
           : '-';
+        const checked = selection.has(r.id) ? 'checked' : '';
         return `<tr>
+          ${showCheck ? `<td><input type="checkbox" data-run-check="${r.id}" ${checked} /></td>` : ''}
           <td>${escapeHtml(r.taskName)}</td>
           <td>${fmtTime(r.startedAt)}</td>
           <td>${fmtDuration(r.durationMs)}</td>
@@ -571,15 +632,31 @@ async function openRunDetail(runId) {
 
 function renderAlerts() {
   const alerts = state.alerts;
+  if (!state.alertSelection) state.alertSelection = new Set();
+  const visibleIds = new Set(alerts.map((a) => a.id));
+  for (const id of [...state.alertSelection]) if (!visibleIds.has(id)) state.alertSelection.delete(id);
+
+  const selCount = state.alertSelection.size;
+  const allChecked = alerts.length > 0 && alerts.every((a) => state.alertSelection.has(a.id));
+
   contentEl.innerHTML = `
     <div class="page-header">
       <div><h2>告警中心</h2><div class="sub">异常事件；支持确认 / 静默 / 手动标记恢复</div></div>
-      <div class="row"><button class="small" id="btnRefreshAlerts">刷新</button></div>
+      <div class="row">
+        <button class="small" id="btnRefreshAlerts">刷新</button>
+        <button class="small danger ghost" id="btnDelSelectedAlerts" ${selCount ? '' : 'disabled'}>删除所选 (<span id="alertSelCount">${selCount}</span>)</button>
+        <button class="small ghost" id="btnClearResolvedAlerts">清空已恢复</button>
+        <button class="small danger ghost" id="btnClearAllAlerts">清空全部</button>
+      </div>
     </div>
     ${
       alerts.length
-        ? alerts.map((a) => `
-          <div class="alert-row" data-alert-id="${a.id}">
+        ? `<div class="row" style="margin-bottom:.5rem">
+            <label class="toggle"><input id="alertCheckAll" type="checkbox" ${allChecked ? 'checked' : ''} /> 全选</label>
+            <span class="muted">共 ${alerts.length} 条 · 已选 ${selCount}</span>
+          </div>` + alerts.map((a) => `
+          <div class="alert-row" data-alert-id="${a.id}" style="grid-template-columns:24px 1fr auto">
+            <input type="checkbox" data-alert-check="${a.id}" ${state.alertSelection.has(a.id) ? 'checked' : ''} style="margin-top:.4rem;width:auto" />
             <div>
               <div class="row" style="gap:.4rem">
                 <span class="msg">${escapeHtml(a.taskName)}</span>
@@ -594,6 +671,7 @@ function renderAlerts() {
               ${a.state !== 'silenced' && a.state !== 'recovered' ? '<button class="small" data-alert-action="silence">静默 1 小时</button>' : ''}
               ${a.state !== 'recovered' ? '<button class="small primary" data-alert-action="recover">标记恢复</button>' : ''}
               ${a.lastRunId ? `<button class="small" data-alert-view="${a.lastRunId}">最近执行</button>` : ''}
+              <button class="small danger ghost" data-alert-delete="${a.id}">删除</button>
             </div>
           </div>
         `).join('')
@@ -604,6 +682,59 @@ function renderAlerts() {
   document.getElementById('btnRefreshAlerts')?.addEventListener('click', async () => {
     await refreshAlerts();
     render();
+  });
+
+  document.getElementById('alertCheckAll')?.addEventListener('change', (e) => {
+    if (e.target.checked) for (const a of alerts) state.alertSelection.add(a.id);
+    else state.alertSelection.clear();
+    render();
+  });
+
+  document.querySelectorAll('[data-alert-check]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.alertCheck;
+      if (cb.checked) state.alertSelection.add(id);
+      else state.alertSelection.delete(id);
+      const c = document.getElementById('alertSelCount');
+      if (c) c.textContent = String(state.alertSelection.size);
+      const del = document.getElementById('btnDelSelectedAlerts');
+      if (del) del.disabled = state.alertSelection.size === 0;
+    });
+  });
+
+  document.getElementById('btnDelSelectedAlerts')?.addEventListener('click', async () => {
+    const ids = [...state.alertSelection];
+    if (!ids.length) return;
+    if (!confirm(`确认删除选中的 ${ids.length} 条告警？`)) return;
+    await api.deleteAlerts(ids);
+    state.alertSelection = new Set();
+    await refreshAlerts();
+    render();
+  });
+
+  document.getElementById('btnClearResolvedAlerts')?.addEventListener('click', async () => {
+    if (!confirm('确认清空所有已恢复的告警？')) return;
+    await api.clearAlerts('resolved');
+    state.alertSelection = new Set();
+    await refreshAlerts();
+    render();
+  });
+
+  document.getElementById('btnClearAllAlerts')?.addEventListener('click', async () => {
+    if (!confirm('确认清空全部告警？此操作不可撤销。')) return;
+    await api.clearAlerts('all');
+    state.alertSelection = new Set();
+    await refreshAlerts();
+    render();
+  });
+
+  document.querySelectorAll('[data-alert-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('确认删除这条告警？')) return;
+      await api.deleteAlerts([btn.dataset.alertDelete]);
+      await refreshAlerts();
+      render();
+    });
   });
 
   for (const row of document.querySelectorAll('[data-alert-id]')) {
@@ -627,7 +758,6 @@ function renderSettings() {
   const d = cfg.defaultModel || {};
   const p = cfg.planningModel;
   const i = cfg.insightModel;
-  const presets = state.presets || [];
 
   contentEl.innerHTML = `
     <div class="page-header">
@@ -651,17 +781,9 @@ function renderSettings() {
 
     <div class="card">
       <h3>默认执行模型（必填 · 视觉多模态）</h3>
-      <p class="hint">用于元素定位、AI 任务生成以及未单独配置的其他意图。豆包用户从下方下拉一键填充，再粘贴自己的 API Key 即可。</p>
-      <div class="row" style="gap:.5rem">
-        <select id="presetSelect" style="flex:1">
-          <option value="">— 选择一个模型预设以一键填充 —</option>
-          ${presets.map((p) => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('')}
-        </select>
-        <button class="small" id="btnApplyPreset">应用预设</button>
-      </div>
-      <div class="muted" id="presetDesc" style="margin:.4rem 0 .5rem"></div>
+      <p class="hint">用于元素定位、AI 任务生成以及未单独配置的其他意图。豆包接入：Base URL <code>https://ark.cn-beijing.volces.com/api/v3</code>，Model 例如 <code>doubao-seed-2-0-mini-260215</code>，Family <code>doubao-seed</code>。</p>
       <div class="row-2">
-        <div><label class="field">API Key</label><input id="defApiKey" type="password" value="${escapeHtml(d.apiKey || '')}" /></div>
+        <div><label class="field">API Key</label><input id="defApiKey" type="text" value="${escapeHtml(d.apiKey || '')}" /></div>
         <div><label class="field">Base URL</label><input id="defBaseUrl" type="url" value="${escapeHtml(d.baseUrl || '')}" /></div>
       </div>
       <div class="row-2">
@@ -680,7 +802,7 @@ function renderSettings() {
         <h4 style="margin:.25rem 0 .5rem;font-size:.9rem">任务规划 Planning 模型（aiAct / ai）</h4>
         <p class="hint">规划 **不是** 纯文本通道；建议选择对 UI 交互理解较好的多模态模型。留空走默认模型。</p>
         <div class="row-2">
-          <div><label class="field">API Key</label><input id="planApiKey" type="password" value="${escapeHtml(p?.apiKey || '')}" /></div>
+          <div><label class="field">API Key</label><input id="planApiKey" type="text" value="${escapeHtml(p?.apiKey || '')}" /></div>
           <div><label class="field">Base URL</label><input id="planBaseUrl" type="url" value="${escapeHtml(p?.baseUrl || '')}" /></div>
         </div>
         <div class="row-2">
@@ -691,7 +813,7 @@ function renderSettings() {
         <h4 style="margin:1rem 0 .5rem;font-size:.9rem">页面理解 Insight 模型（aiQuery / aiAssert / aiAsk / aiWaitFor）</h4>
         <p class="hint">巡检场景最常用。留空走默认模型。</p>
         <div class="row-2">
-          <div><label class="field">API Key</label><input id="insApiKey" type="password" value="${escapeHtml(i?.apiKey || '')}" /></div>
+          <div><label class="field">API Key</label><input id="insApiKey" type="text" value="${escapeHtml(i?.apiKey || '')}" /></div>
           <div><label class="field">Base URL</label><input id="insBaseUrl" type="url" value="${escapeHtml(i?.baseUrl || '')}" /></div>
         </div>
         <div class="row-2">
@@ -708,24 +830,6 @@ function renderSettings() {
       </div>
     </details>
   `;
-
-  const presetSelect = document.getElementById('presetSelect');
-  const presetDesc = document.getElementById('presetDesc');
-  presetSelect?.addEventListener('change', () => {
-    const sel = (state.presets || []).find((p) => p.id === presetSelect.value);
-    presetDesc.textContent = sel?.description || '';
-  });
-  document.getElementById('btnApplyPreset')?.addEventListener('click', () => {
-    const sel = (state.presets || []).find((p) => p.id === presetSelect.value);
-    if (!sel) {
-      presetDesc.textContent = '请先选择一个预设。';
-      return;
-    }
-    document.getElementById('defBaseUrl').value = sel.profile.baseUrl;
-    document.getElementById('defModelName').value = sel.profile.modelName;
-    document.getElementById('defModelFamily').value = sel.profile.modelFamily || '';
-    presetDesc.textContent = '已填入预设，请在 API Key 处粘贴你的密钥后点保存。';
-  });
 
   document.getElementById('btnSaveBridge').addEventListener('click', async () => {
     const port = Number.parseInt(document.getElementById('bridgePort').value, 10);
