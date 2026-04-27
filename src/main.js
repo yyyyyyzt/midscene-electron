@@ -175,9 +175,15 @@ ipcMain.handle('task:delete', (_e, id) => {
   deleteTask(userDataPath(), id);
   return { ok: true };
 });
-ipcMain.handle('task:pause', (_e, { id, paused }) =>
-  updateTask(userDataPath(), id, { paused: Boolean(paused) }),
-);
+ipcMain.handle('task:pause', (_e, { id, paused }) => {
+  const updated = updateTask(userDataPath(), id, { paused: Boolean(paused) });
+  if (updated && !paused) {
+    // 重新激活时把 nextRunAt 推后一个间隔，避免立刻执行
+    const interval = Math.max(1, Number(updated.schedule?.intervalMinutes) || 10);
+    return updateTask(userDataPath(), id, { nextRunAt: Date.now() + interval * 60_000 });
+  }
+  return updated;
+});
 ipcMain.handle('task:run', (_e, id) => {
   if (!scheduler) return { ok: false, error: 'scheduler 未启动' };
   scheduler.enqueueNow(id);
