@@ -9,6 +9,7 @@
  */
 
 import { taskTemplate } from '../store/task-store.js';
+import { parseYamlFlow, describeFlow } from './yaml-flow.js';
 
 /** 系统提示词，约束模型严格按 schema 返回 JSON。 */
 const SYSTEM_PROMPT = `你是一个浏览器巡检任务生成助手。
@@ -60,6 +61,15 @@ RuleDef 三选一：
   - 默认 runMode 为 newTabWithUrl；只有用户明确说「我已经打开页面」「当前标签」才用 currentTab；
   - 规则的 message 字段写一句中文，给值班人员看的告警标题。
 
+【YAML 操作流程】
+有时用户会附带一段 Midscene Recorder 录制的 YAML，里面包含点击下拉、滚动表格等复杂导航。此时：
+  - 务必把 entryUrl 设成 YAML 中 web.url 的值；
+  - readyPrompt 写「页面初始加载完成」；
+  - extractPrompt 只描述「YAML 操作执行完后页面上要提取的关键字段」；
+  - extractSchema 列出字段名和类型，确保与规则中的 field 一致；
+  - 不要把整个 YAML 复制到 description 或 extractPrompt 里，YAML 会原样回传给 Midscene 执行；
+  - rules 仍然只针对 aiQuery 返回的字段写。
+
 【示例】
 用户："监控 https://x.example/finance，余额低于 10 元就提醒我"
 应输出（节选）:
@@ -77,15 +87,31 @@ RuleDef 三选一：
 /**
  * @param {{
  *   description: string;
+ *   flowYaml?: string;
  *   profile: { apiKey: string; baseUrl: string; modelName: string; modelFamily?: string };
  *   signal?: AbortSignal;
  * }} input
- * @returns {Promise<{ ok: true; task: any } | { ok: false; error: string; raw?: string }>}
+ * @returns {Promise<{ ok: true; task: any; flowSummary?: any[] } | { ok: false; error: string; raw?: string }>}
  */
 export async function generateTaskFromPrompt(input) {
   const { description, profile } = input;
-  if (!description?.trim()) {
-    return { ok: false, error: '请输入任务描述（一句话即可）。' };
+  const yamlText = (input.flowYaml || '').trim();
+  if (!description?.trim() && !yamlText) {
+    return { ok: false, error: '请输入任务描述或粘贴 Recorder YAML。' };
+  }
+
+  /** 校验并提取 yaml meta，提前阻断错误 yaml 进入模型 */
+  /** @type {{viewportWidth?:number; viewportHeight?:number; entryUrl?:string} | null} */
+  let yamlMeta = null;
+  /** @type {any[]} */
+  let yamlFlow = [];
+  if (yamlText) {
+    const r = parseYamlFlow(yamlText);
+    if (!r.ok) {
+      return { ok: false, error: `YAML 解析失败：${r.error}` };
+    }
+    yamlMeta = r.meta;
+    yamlFlow = r.flow;
   }
   const apiKey = (profile.apiKey || '').trim();
   const baseUrl = (profile.baseUrl || '').trim().replace(/\/+$/, '');
@@ -99,13 +125,21 @@ export async function generateTaskFromPrompt(input) {
   }
 
   const url = `${baseUrl}/chat/completions`;
+  const userParts = [];
+  if (description?.trim()) userParts.push(`用户描述：\n${description.trim()}`);
+  if (yamlText) {
+    userParts.push(
+      `用户附带的 Midscene Recorder YAML（不要原样复制；只用来推断 entryUrl 与提取目标）：\n${yamlText}`,
+    );
+    if (yamlMeta?.entryUrl) userParts.push(`已确认 entryUrl = ${yamlMeta.entryUrl}`);
+  }
   const body = {
     model: modelName,
     temperature: 0.2,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `用户描述：\n${description.trim()}` },
+      { role: 'user', content: userParts.join('\n\n') },
     ],
   };
 
@@ -161,7 +195,15 @@ export async function generateTaskFromPrompt(input) {
   }
 
   const task = mergeWithTemplate(parsed);
-  return { ok: true, task };
+  if (yamlText) {
+    task.flowYaml = yamlText;
+    if (!task.entryUrl && yamlMeta?.entryUrl) task.entryUrl = yamlMeta.entryUrl;
+  }
+  return {
+    ok: true,
+    task,
+    flowSummary: yamlFlow.length ? describeFlow(yamlFlow) : undefined,
+  };
 }
 
 function safeText(r) {

@@ -298,6 +298,7 @@ function renderTaskCard(t) {
         <span>模式：${t.runMode === 'currentTab' ? 'currentTab（调试）' : 'newTabWithUrl'}</span>
         <span>频率：每 ${interval} 分钟（${t.schedule.activeFrom}-${t.schedule.activeTo}）</span>
         <span>规则数：${t.rules?.length || 0}</span>
+        ${t.flowYaml ? '<span>📜 含 YAML 流程</span>' : ''}
         <span>上次：${fmtTime(t.lastRunAt)}</span>
         <span>下次：${fmtTime(t.nextRunAt)}</span>
       </div>
@@ -390,6 +391,10 @@ function renderPhaseTimeline(phases) {
       else if (p.detail && typeof p.detail === 'object') {
         if (p.name === 'connect') detail = `${escapeHtml(p.detail.runMode)} · ${escapeHtml(p.detail.entryUrl || '当前标签')}`;
         else if (p.name === 'extract') detail = `<details class="collapse"><summary>查看提示词与返回</summary><div class="collapse-body"><label class="field">prompt</label><pre class="log">${escapeHtml(p.detail.prompt || '')}</pre><label class="field">value</label><pre class="log">${escapeHtml(JSON.stringify(p.detail.value, null, 2))}</pre></div></details>`;
+        else if (p.name === 'flow') {
+          const w = (p.detail.warnings || []).length ? '；警告: ' + p.detail.warnings.join('；') : '';
+          detail = `重放 ${p.detail.steps} 步${w}` + (p.detail.yaml ? `<details class="collapse"><summary>查看 YAML</summary><div class="collapse-body"><pre class="log">${escapeHtml(p.detail.yaml)}</pre></div></details>` : '');
+        }
         else if (p.name === 'rules') detail = `${p.detail.total} 条规则，触发 ${p.detail.triggered?.length || 0} 条`;
         else if (p.detail.prompt) detail = escapeHtml(p.detail.prompt);
       }
@@ -758,7 +763,9 @@ const ASSISTANT_EXAMPLES = [
 
 function openTaskAssistant() {
   let currentTask = null;
-  let abortCtrl = null;
+  let lastPrompt = '';
+  let lastYaml = '';
+  let yamlPreview = null;
 
   const renderAssistant = (phase) => {
     const examplesHtml = ASSISTANT_EXAMPLES
@@ -773,13 +780,27 @@ function openTaskAssistant() {
         <button class="ghost" id="asstClose">关闭</button>
       </div>
       <div class="modal-body">
-        <p class="hint">用一句中文描述你想监控的页面与异常条件，AI 会帮你生成完整的巡检任务。</p>
+        <p class="hint">用一句中文描述你想监控的页面与异常条件；如果涉及下拉、滚动、点击等复杂导航，可以同时粘贴 Midscene Recorder 录制的 YAML，AI 会一并整合。</p>
         <label class="field">任务描述</label>
-        <textarea id="asstPrompt" rows="4" placeholder="例如：每 10 分钟看一下 https://crm.example.com/dashboard 是否还能正常打开，并提取「今日订单数」，少于 10 单就提醒我"></textarea>
+        <textarea id="asstPrompt" rows="3" placeholder="例如：监控腾讯云费用中心-资源包页面，资源包总览下拉选择「实时音视频」，找到总剩余量中的余量数值，低于 38 万分钟报警">${escapeHtml(lastPrompt)}</textarea>
         <div class="row" style="margin-top:.4rem;flex-wrap:wrap">
           <span class="muted">试试这些：</span>
           ${examplesHtml}
         </div>
+
+        <details class="collapse" style="margin-top:.85rem" ${lastYaml ? 'open' : ''}>
+          <summary>📜 操作流程 YAML（可选 · 来自 Midscene 扩展的 Recorder）</summary>
+          <div class="collapse-body">
+            <p class="hint">复杂交互（下拉、滚动、跨标签页跳转）建议用 Recorder 录制好再粘贴在这里；其余字段（提取 / 规则 / 调度）仍由 AI 自动生成。</p>
+            <textarea id="asstYaml" rows="8" placeholder="web:&#10;  url: https://...&#10;tasks:&#10;  - name: ...&#10;    flow:&#10;      - aiTap: ...&#10;      - aiScroll: ...">${escapeHtml(lastYaml)}</textarea>
+            <div class="row" style="margin-top:.4rem">
+              <button class="small" id="asstYamlPreview">解析并预览</button>
+              <span class="muted" id="asstYamlHint"></span>
+            </div>
+            <div id="asstYamlSteps">${yamlPreview ? renderFlowSteps(yamlPreview) : ''}</div>
+          </div>
+        </details>
+
         <div class="row" style="margin-top:.85rem">
           <button class="primary" id="asstGenerate" ${phase === 'loading' ? 'disabled' : ''}>${phase === 'loading' ? 'AI 正在生成…' : '生成任务'}</button>
           <button class="small" id="asstAdvanced">改用高级模式</button>
@@ -801,7 +822,6 @@ function openTaskAssistant() {
 
   const bindAssistant = () => {
     document.getElementById('asstClose').addEventListener('click', () => {
-      abortCtrl?.abort();
       closeModal();
     });
     document.getElementById('asstAdvanced').addEventListener('click', () => {
@@ -811,19 +831,40 @@ function openTaskAssistant() {
     document.querySelectorAll('[data-example]').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.getElementById('asstPrompt').value = btn.dataset.example;
+        lastPrompt = btn.dataset.example;
       });
+    });
+    document.getElementById('asstYamlPreview')?.addEventListener('click', async () => {
+      const txt = document.getElementById('asstYaml').value.trim();
+      const hint = document.getElementById('asstYamlHint');
+      const stepsBox = document.getElementById('asstYamlSteps');
+      if (!txt) { hint.textContent = '请先粘贴 YAML'; stepsBox.innerHTML = ''; return; }
+      const r = await api.parseYaml(txt);
+      if (!r.ok) {
+        hint.textContent = r.error || '解析失败';
+        stepsBox.innerHTML = '';
+        yamlPreview = null;
+        return;
+      }
+      yamlPreview = r.steps;
+      const meta = r.meta || {};
+      hint.textContent = `共 ${r.steps.length} 步${meta.entryUrl ? ' · ' + meta.entryUrl : ''}${r.warnings?.length ? ' · ' + r.warnings.join('；') : ''}`;
+      stepsBox.innerHTML = renderFlowSteps(r.steps);
     });
     document.getElementById('asstGenerate').addEventListener('click', async () => {
       const desc = document.getElementById('asstPrompt').value.trim();
+      const yamlText = document.getElementById('asstYaml')?.value?.trim() || '';
+      lastPrompt = desc;
+      lastYaml = yamlText;
       const hint = document.getElementById('asstHint');
-      if (!desc) {
-        hint.textContent = '请先输入任务描述';
+      if (!desc && !yamlText) {
+        hint.textContent = '请先输入任务描述或粘贴 YAML';
         return;
       }
       hint.textContent = '调用模型中…';
       renderAssistant('loading');
       try {
-        const res = await api.generateTask(desc);
+        const res = await api.generateTask(desc, yamlText);
         if (!res?.ok) {
           currentTask = null;
           renderAssistant('idle');
@@ -831,6 +872,7 @@ function openTaskAssistant() {
           return;
         }
         currentTask = res.task;
+        if (res.flowSummary) yamlPreview = res.flowSummary;
         renderAssistant('done');
       } catch (e) {
         currentTask = null;
@@ -868,6 +910,18 @@ function openTaskAssistant() {
   renderAssistant('idle');
 }
 
+function renderFlowSteps(steps) {
+  if (!Array.isArray(steps) || !steps.length) return '';
+  return `<table class="table" style="margin-top:.5rem">
+    <thead><tr><th style="width:48px">#</th><th style="width:130px">动作</th><th>定位 / 内容</th></tr></thead>
+    <tbody>${steps.map((s) => `<tr>
+      <td>${s.index + 1}</td>
+      <td><span class="status-pill paused">${escapeHtml(s.action)}</span></td>
+      <td>${escapeHtml(s.summary || '')}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
 function ruleHumanLabel(r) {
   const when = r.when === 'pass' ? '【期望成立】' : '【条件成立报警】';
   if (r.type === 'threshold') {
@@ -884,6 +938,10 @@ function ruleHumanLabel(r) {
 
 function renderTaskSummary(t) {
   const ruleLines = (t.rules || []).map(ruleHumanLabel);
+  const yamlLines = (t.flowYaml || '').trim().split('\n').filter(Boolean);
+  const flowSummary = t.flowYaml
+    ? `<div class="muted" style="margin:.25rem 0 .25rem">📜 已绑定 ${yamlLines.length} 行 Recorder YAML（执行时由 Midscene 重放）</div>`
+    : '';
   return `
     <div class="card" style="margin-top:1rem">
       <h3>AI 生成结果</h3>
@@ -916,6 +974,7 @@ function renderTaskSummary(t) {
       <textarea rows="2" disabled>${escapeHtml(t.extractPrompt)}</textarea>
       <label class="field">取数 Schema</label>
       <textarea rows="2" disabled>${escapeHtml(t.extractSchema || '（未指定，模型自由返回）')}</textarea>
+      ${flowSummary}
       <label class="field">规则（${ruleLines.length} 条）</label>
       <div class="muted" style="background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:.5rem .65rem">
         ${ruleLines.length ? ruleLines.join('<br/>') : '（无规则；将默认仅校验「页面非登录页/非错误页」）'}
@@ -1065,7 +1124,21 @@ function renderWizardBody(step, d) {
     return `
       <label class="field">页面就绪条件（aiWaitFor）</label>
       <textarea id="f_readyPrompt" rows="2">${escapeHtml(d.readyPrompt)}</textarea>
-      <label class="field">粗粒度检查（aiAssert，用于排除登录页/错误页）</label>
+
+      <details class="collapse" style="margin-top:.6rem" ${d.flowYaml ? 'open' : ''}>
+        <summary>📜 操作流程 YAML（可选 · 适合下拉/滚动/点击等复杂导航）</summary>
+        <div class="collapse-body">
+          <p class="hint">用 Midscene Chrome 扩展的 Recorder 录制好 YAML，粘贴在这里。执行时会先按 YAML 操作页面，再执行下方的取数与规则。</p>
+          <textarea id="f_flowYaml" rows="10" placeholder="web:&#10;  url: https://...&#10;tasks:&#10;  - name: ...&#10;    flow:&#10;      - aiTap: ...&#10;      - aiScroll: ...">${escapeHtml(d.flowYaml || '')}</textarea>
+          <div class="row" style="margin-top:.4rem">
+            <button class="small" type="button" id="wzYamlPreview">解析并预览</button>
+            <span class="muted" id="wzYamlHint"></span>
+          </div>
+          <div id="wzYamlSteps"></div>
+        </div>
+      </details>
+
+      <label class="field" style="margin-top:.6rem">粗粒度检查（aiAssert，用于排除登录页/错误页）</label>
       <textarea id="f_loginAssertPrompt" rows="2">${escapeHtml(d.loginAssertPrompt)}</textarea>
       <label class="field">结构化提取 Prompt（aiQuery）</label>
       <textarea id="f_extractPrompt" rows="3">${escapeHtml(d.extractPrompt)}</textarea>
@@ -1156,6 +1229,23 @@ function renderRuleRow(rule) {
 }
 
 function bindStepInputs(step, d) {
+  if (step === 2) {
+    document.getElementById('wzYamlPreview')?.addEventListener('click', async () => {
+      const txt = document.getElementById('f_flowYaml').value.trim();
+      const hint = document.getElementById('wzYamlHint');
+      const stepsBox = document.getElementById('wzYamlSteps');
+      if (!txt) { hint.textContent = '请先粘贴 YAML'; stepsBox.innerHTML = ''; return; }
+      const r = await api.parseYaml(txt);
+      if (!r.ok) {
+        hint.textContent = r.error || '解析失败';
+        stepsBox.innerHTML = '';
+        return;
+      }
+      const meta = r.meta || {};
+      hint.textContent = `共 ${r.steps.length} 步${meta.entryUrl ? ' · ' + meta.entryUrl : ''}${r.warnings?.length ? ' · ' + r.warnings.join('；') : ''}`;
+      stepsBox.innerHTML = renderFlowSteps(r.steps);
+    });
+  }
   if (step === 3) {
     const box = document.getElementById('rulesBox');
     const addBtns = document.querySelectorAll('[data-add-rule]');
@@ -1199,6 +1289,7 @@ function readStep(step, d, strict) {
     d.loginAssertPrompt = document.getElementById('f_loginAssertPrompt').value;
     d.extractPrompt = document.getElementById('f_extractPrompt').value;
     d.extractSchema = document.getElementById('f_extractSchema').value;
+    d.flowYaml = document.getElementById('f_flowYaml')?.value ?? d.flowYaml ?? '';
   } else if (step === 3) {
     const rows = document.querySelectorAll('#rulesBox [data-rule-id]');
     const rules = [];

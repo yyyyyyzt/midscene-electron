@@ -38,6 +38,7 @@ const LEGACY_RECIPE = 'task-recipe.json';
  *   extractPrompt: string;
  *   extractSchema: string;
  *   loginAssertPrompt: string;
+ *   flowYaml: string;
  *   rules: RuleDef[];
  *   schedule: {
  *     enabled: boolean;
@@ -72,6 +73,7 @@ const TEMPLATE = {
   extractPrompt: '请提取页面上的关键指标，返回 JSON 对象',
   extractSchema: '',
   loginAssertPrompt: '当前页面是业务后台页面，不是登录页、错误页、空白页',
+  flowYaml: '',
   rules: [],
   schedule: {
     enabled: true,

@@ -7,6 +7,7 @@
 ## 核心特性
 
 - **AI 帮手新建任务**：一句中文描述 → 模型直接生成完整巡检任务（任务名、入口 URL、`aiQuery` Prompt、Schema、阈值/缺失/表达式规则、调度与告警）。
+- **YAML 操作流程（复杂交互）**：把 Midscene Chrome 扩展 Recorder 录制的 YAML 直接粘贴进任务，执行时由 `agent.runYaml()` 重放下拉、滚动、点击等多步导航；YAML 与自然语言可同时使用，AI 自动推断 entryUrl、提取目标和规则。
 - **模型预设一键填充**：设置页内置豆包 Doubao-Seed-2.0 全系列（mini-260215 首推）+ OpenAI/自定义；选择后只需粘贴 API Key。
 - **仅 Bridge 模式**：复用用户手工登录好的桌面 Chrome 会话，不启动 Chromium / 不走 CDP / 不内置下载浏览器。
 - **专用值守定位**：定时任务默认 `newTabWithUrl`，手动调试使用 `currentTab`。
@@ -38,8 +39,9 @@ npm start
 
 1. **设置 → 默认执行模型**：从「模型预设」下拉里挑「豆包 Doubao-Seed-2.0-mini-260215」（首推）或其他豆包型号 → 点「应用预设」→ 粘贴你的火山方舟 API Key → 保存。
 2. **任务 → 新建任务（AI 帮手）**：用一句话描述要监控什么，例如「每 10 分钟看 https://crm.example.com/dashboard 是否还能正常打开，并提取『今日订单数』，少于 10 单就提醒我」→ 点「生成任务」→ 一眼扫过摘要 → 点「保存任务」。
-3. 在桌面 Chrome 安装 [Midscene 扩展](https://midscenejs.com/bridge-mode) → 切到 Bridge 模式 → 点「允许连接」。
-4. 在应用里点「立即执行」或等待调度触发，结果会写到执行记录与告警中心。
+3. **复杂交互场景**：在桌面 Chrome 用 Midscene 扩展的 **Recorder** 把下拉、滚动、点击的过程录一遍，把 Recorder 输出的 YAML 粘到 AI 帮手对话框的「📜 操作流程 YAML」区，再写一句中文（例如「找到总剩余量，低于 38 万分钟报警」），AI 会把 YAML 当作导航步骤，自动写好其后的 `aiQuery` 与告警规则。
+4. 在桌面 Chrome 安装 [Midscene 扩展](https://midscenejs.com/bridge-mode) → 切到 Bridge 模式 → 点「允许连接」。
+5. 在应用里点「立即执行」或等待调度触发，结果会写到执行记录与告警中心。
 
 > 想精调？AI 生成后点「在向导里继续编辑」，或在任务列表点「高级模式」直接进入 5 步向导。
 
@@ -49,11 +51,12 @@ npm start
 
 1. 连接 Bridge（`newTabWithUrl` 默认 / `currentTab` 调试）
 2. `aiWaitFor` 等待页面就绪
-3. `aiAssert` 校验非登录页 / 非错误页 / 非空白页
-4. `aiQuery` 按 Prompt + Schema 提取结构化 JSON
-5. 规则引擎（`threshold` / `missing` / `expression`）判定异常
-6. 保存执行记录（提取结果 / 规则判定 / 日志 / 报告路径）
-7. 触发告警 / 恢复通知
+3. （可选）执行任务绑定的 **YAML 操作流程**（`agent.runYaml`）：下拉、滚动、点击等多步导航
+4. `aiAssert` 校验非登录页 / 非错误页 / 非空白页
+5. `aiQuery` 按 Prompt + Schema 提取结构化 JSON
+6. 规则引擎（`threshold` / `missing` / `expression`）按 `when` 决定是否触发告警
+7. 保存执行记录（提取结果 / 规则判定 / 各阶段耗时 / 日志 / 报告路径）
+8. 触发告警 / 恢复通知
 
 ## 数据与存储
 

@@ -54,6 +54,15 @@
 - [x] 总览页新增「新手指引」：扩展安装 → 设置 → 新建任务 → Chrome 内允许连接。
 - [x] AI 帮手与 Midscene 默认执行模型共用一组配置，单模型即可承担「生成 + 巡检 + 取数」。
 
+## 里程碑 M7 — 复杂交互：YAML 操作流程
+
+- [x] 引入 `js-yaml` + `runtime/yaml-flow.js`：解析 Recorder YAML（兼容完整 yaml / 仅 tasks / 仅 flow），抽取 `web.url / viewport`，描述每一步用于 UI 预览。
+- [x] `InspectionTask.flowYaml` 字段；inspection-runner 在 `aiWaitFor` 与 `aiAssert` 之间新增 `flow` 阶段，调用 `agent.runYaml(...)` 直接重放下拉/滚动/点击等指令。
+- [x] AI 帮手对话框增加可选「YAML 输入区」+「解析并预览」按钮；YAML 步骤摘要列表（动作 + 定位）。
+- [x] 5 步向导第 3 步同时支持 YAML 粘贴 + 预览，与就绪/取数共用一屏。
+- [x] 任务列表卡片显示「📜 含 YAML 流程」标记；详情弹窗的 phases 时间线展示 flow 步数与可折叠 YAML。
+- [x] task-generator 同时接收描述与 YAML，合成完整任务（entryUrl / extractPrompt / extractSchema / rules / flowYaml）。
+
 ## 里程碑 M6 — 规则语义修正与执行格式化
 
 - [x] **规则语义修正**：增加 `when` 字段（`fail` 默认 / `pass` 可选），普通用户描述「< 10 报警」直接对应 `op:'<', value:10, when:'fail'`；不再需要反向思维写阈值。AI 系统提示词同步修正，并给两个示例。

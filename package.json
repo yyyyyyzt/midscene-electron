@@ -12,7 +12,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@midscene/web": "^1.7.4"
+    "@midscene/web": "^1.7.4",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "electron": "^35.1.0"

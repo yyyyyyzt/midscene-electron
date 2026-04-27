@@ -23,7 +23,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     ipcRenderer.invoke('alert:update', { id, action, minutes }),
 
   listPresets: () => ipcRenderer.invoke('preset:list'),
-  generateTask: (description) => ipcRenderer.invoke('task:generate', { description }),
+  generateTask: (description, flowYaml) =>
+    ipcRenderer.invoke('task:generate', { description, flowYaml }),
+  parseYaml: (text) => ipcRenderer.invoke('yaml:parse', text),
 
   onSchedulerEvent: (cb) => {
     const listener = (_e, payload) => cb(payload);
