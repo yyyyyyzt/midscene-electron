@@ -54,6 +54,15 @@
 - [x] 总览页新增「新手指引」：扩展安装 → 设置 → 新建任务 → Chrome 内允许连接。
 - [x] AI 帮手与 Midscene 默认执行模型共用一组配置，单模型即可承担「生成 + 巡检 + 取数」。
 
+## 里程碑 M6 — 规则语义修正与执行格式化
+
+- [x] **规则语义修正**：增加 `when` 字段（`fail` 默认 / `pass` 可选），普通用户描述「< 10 报警」直接对应 `op:'<', value:10, when:'fail'`；不再需要反向思维写阈值。AI 系统提示词同步修正，并给两个示例。
+- [x] 规则结果输出 `RuleResult{ triggered, conditionMet, conditionLabel, actual, when, severity, message, error }`，向前兼容 `ok=!triggered`。
+- [x] 执行流程结构化：`inspection-runner` 输出 `phases[]`（connect / ready / assertNotLogin / extract / rules），每步含状态、耗时、详情、错误。
+- [x] 执行详情弹窗：阶段时间线表格、提取结果 JSON、规则结果卡片（条件 / 实际值 / 触发与否 / 错误）、执行日志；提供「复制为 Markdown」按钮，方便粘给 LLM debug。
+- [x] 5 步向导规则编辑器加 `when` 切换；新建阈值规则默认 `op:'<'`、默认 `when:'fail'`，更贴近报警直觉。
+- [x] 执行记录列表的「命中规则」改为「{触发}/{总数} 触发」表达。
+
 ---
 
 ## 迁移说明

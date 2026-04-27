@@ -165,6 +165,7 @@ export class Scheduler {
       rec.status = result.status;
       rec.extracted = result.extracted;
       rec.ruleResults = result.ruleResults;
+      rec.phases = result.phases || [];
       rec.reportPath = result.reportPath;
       rec.error = result.error;
 
@@ -179,7 +180,7 @@ export class Scheduler {
         }
         this.retries.delete(task.id);
       } else if (result.status === 'alert') {
-        const msg = result.failedMessages.join('；') || '任务规则判定异常';
+        const msg = (result.triggeredMessages || []).join('；') || '任务规则判定异常';
         const severity = guessSeverity(result.ruleResults);
         const info = reportFailure(this.userDataPath, {
           taskId: task.id,
@@ -237,7 +238,7 @@ export class Scheduler {
 function guessSeverity(ruleResults) {
   let s = 'warning';
   for (const r of ruleResults || []) {
-    if (!r.ok) {
+    if (r.triggered ?? !r.ok) {
       if (r.severity === 'critical') return 'critical';
       if (r.severity === 'warning') s = 'warning';
     }

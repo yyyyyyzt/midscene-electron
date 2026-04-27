@@ -6,11 +6,15 @@ const FILE_NAME = 'tasks.json';
 const LEGACY_RECIPE = 'task-recipe.json';
 
 /**
- * 数值阈值规则：对 aiQuery 返回的单个字段做 >=/<=/between 等判断。
+ * 巡检规则。
+ *
+ *  - when='fail' (默认): 条件成立 → 触发告警（普通用户写「<10 报警」就用 fail）
+ *  - when='pass'        : 条件成立 → 通过（健康检查语义）
  *
  * @typedef {{
  *   id: string;
  *   type: 'threshold' | 'missing' | 'expression';
+ *   when?: 'fail' | 'pass';
  *   field?: string;
  *   op?: '>' | '>=' | '<' | '<=' | '==' | '!=' | 'between';
  *   value?: number | string;

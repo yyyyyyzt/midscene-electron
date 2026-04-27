@@ -16,11 +16,15 @@ const MAX_RUNS_PER_TASK = 100;
  *   status: 'running' | 'ok' | 'alert' | 'error';
  *   durationMs: number | null;
  *   extracted: any;
- *   ruleResults: Array<{
- *     ruleId: string;
- *     ok: boolean;
- *     severity: 'info' | 'warning' | 'critical';
- *     message: string;
+ *   ruleResults: Array<import('../runtime/rule-engine.js').RuleResult>;
+ *   phases: Array<{
+ *     name: string;
+ *     label: string;
+ *     status: 'skipped' | 'ok' | 'error';
+ *     startedAt: number;
+ *     durationMs: number;
+ *     error: string | null;
+ *     detail: any;
  *   }>;
  *   error: string | null;
  *   log: string[];
@@ -76,6 +80,7 @@ export function startRun(userDataPath, seed) {
     durationMs: null,
     extracted: null,
     ruleResults: [],
+    phases: [],
     error: null,
     log: [],
     reportPath: null,
