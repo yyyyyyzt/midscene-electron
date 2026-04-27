@@ -61,13 +61,13 @@ RuleDef 三选一：
   - 默认 runMode 为 newTabWithUrl；只有用户明确说「我已经打开页面」「当前标签」才用 currentTab；
   - 规则的 message 字段写一句中文，给值班人员看的告警标题。
 
-【YAML 操作流程】
-有时用户会附带一段 Midscene Recorder 录制的 YAML，里面包含点击下拉、滚动表格等复杂导航。此时：
-  - 务必把 entryUrl 设成 YAML 中 web.url 的值；
-  - readyPrompt 写「页面初始加载完成」；
-  - extractPrompt 只描述「YAML 操作执行完后页面上要提取的关键字段」；
+【YAML / Playwright 操作流程】
+有时用户会附带 Recorder 的 YAML，或粘贴 Playwright 测试代码（仅其中的 ai* 步骤会被逐步重放）。此时：
+  - 务必把 entryUrl 设成 YAML 中 web.url / Playwright 中 page.goto 的 URL；
+  - **readyPrompt 必须留空字符串 ""**（不要把录制脚本末尾「筛选已生效」等最终状态写进 ready——执行器会先 ready 再重放流程时会永远等不到而超时；有流程时由流程内 aiWaitFor 负责就绪）；
+  - extractPrompt 只描述「流程全部执行完后页面上要提取的关键字段」；
   - extractSchema 列出字段名和类型，确保与规则中的 field 一致；
-  - 不要把整个 YAML 复制到 description 或 extractPrompt 里，YAML 会原样回传给 Midscene 执行；
+  - 不要把整个 YAML/代码复制到 description 或 extractPrompt 里；
   - rules 仍然只针对 aiQuery 返回的字段写。
 
 【示例】
@@ -203,6 +203,7 @@ export async function generateTaskFromPrompt(input) {
     task.flowYaml = yamlText;
     task.flowSource = flowSource || 'auto';
     if (!task.entryUrl && flowMeta?.entryUrl) task.entryUrl = flowMeta.entryUrl;
+    task.readyPrompt = '';
   }
   return {
     ok: true,

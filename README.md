@@ -1,32 +1,30 @@
 # Bridge 巡检工作台
 
-面向 **Windows 专用值守电脑** 的 **Electron 巡检工作台**，通过 [Midscene](https://midscenejs.com/) 的 **Chrome Extension Bridge 模式** 驱动已登录的桌面 Chrome，定时对业务后台进行巡检、取数、规则判定和告警。
+面向 **Windows 专用或闲置时段电脑** 的 **Electron 自动化工作台**：默认场景是 **后台报表巡检**（取数 + 规则 + 告警），同一套 **Bridge-only** 能力也可承载 **简单定时流程**（例如固定步骤的重复操作），前提是接受与巡检相同的 **单 Chrome 会话、串行执行**，不干扰日常办公主力机上的浏览器。
 
-> 本产品不是通用自动化平台。请先阅读 `AGENTS.md` 明确产品边界。
+通过 [Midscene](https://midscenejs.com/) 的 **Chrome Extension Bridge 模式** 驱动本机已登录的 **桌面 Google Chrome**（不启动内置 Chromium、不走 CDP）。
+
+> 连接方式与产品边界见 `AGENTS.md`；实现进度与路线图见 `progress.md`。
 
 ## 核心特性
 
-- **AI 帮手新建任务**：一句中文描述 → 模型直接生成完整巡检任务（任务名、入口 URL、`aiQuery` Prompt、Schema、阈值/缺失/表达式规则、调度与告警）。
-- **复杂交互**：把 Midscene Recorder 输出的 **YAML 或 Playwright 代码**直接粘贴进任务，系统**严格按录制顺序逐步重放**（每步显式调用 `aiTap` / `aiScroll` / `aiWaitFor` 等，不走 runYaml 黑盒），实时上报每步状态与耗时；某一步失败时可选用 `aiAct` 自然语言兜底再尝试一次。任务结构化字段（entryUrl / 提取 / 规则）由 AI 同时生成。
-- **模型预设一键填充**：设置页内置豆包 Doubao-Seed-2.0 全系列（mini-260215 首推）+ OpenAI/自定义；选择后只需粘贴 API Key。
-- **仅 Bridge 模式**：复用用户手工登录好的桌面 Chrome 会话，不启动 Chromium / 不走 CDP / 不内置下载浏览器。
-- **专用值守定位**：定时任务默认 `newTabWithUrl`，手动调试使用 `currentTab`。
-- **结构化任务**：每个任务包含入口 URL、就绪条件、`aiAssert`、`aiQuery`、规则引擎、调度与告警。
-- **规则引擎**：数值阈值、字段缺失、JavaScript 表达式；对 `aiQuery` 返回值做判定。
-- **调度串行**：共享同一桌面 Chrome 会话，按 FIFO 串行执行；支持工作时段与失败重试。
-- **告警状态机**：未处理 / 已确认 / 已静默 / 已恢复；首发通知 + 持续合并 + 恢复通知。
-- **本地存储**：配置 / 任务 / 执行记录 / 告警 全部 JSON 文件，位于 Electron userData。
-- **分层模型**：默认执行模型（必填、视觉多模态） + 可选 Planning / Insight 高级模型。
+- **AI 帮手新建任务**：一句中文描述 → 模型生成结构化任务（入口 URL、`aiQuery`、Schema、规则、调度与告警等）；可附带 Recorder **YAML 或 Playwright**，系统自动识别并逐步重放。
+- **复杂交互**：Recorder 输出的 **YAML 或 Playwright** 粘贴进任务后，**严格逐步重放**（`aiTap` / `aiScroll` / `aiWaitFor` 等），可选 `aiAct` 兜底；**有操作流程时**不先跑独立的「页面就绪」，避免与录制脚本里最终断言顺序冲突。
+- **模型预设**：设置页内置豆包 Doubao-Seed-2.0 系列等一键填充；**默认执行模型**须为视觉多模态；可选 Planning / Insight。
+- **仅 Bridge**：复用用户手工登录好的桌面 Chrome；**不**提供 CDP / Launch / 内置浏览器选项。
+- **默认值守策略**：定时任务默认 `newTabWithUrl`；调试可用 `currentTab`；调度 **FIFO 串行**。
+- **规则引擎**：阈值、缺失、JS 表达式；对 `aiQuery` 返回值判定；适合巡检，也可用于「流程跑完后的简单检查」。
+- **告警**：本地通知 + 可选声音；告警中心每条仅 **确认无误**、**查看执行详情**、**删除**；任务恢复成功时自动标记告警已恢复。
+- **本地存储**：任务、配置、执行记录、告警均为 JSON / 目录，位于 Electron `userData`。
+- **分层模型**：`MIDSCENE_MODEL_*` / `MIDSCENE_PLANNING_MODEL_*` / `MIDSCENE_INSIGHT_MODEL_*`。
 
 ## 运行时前提
 
-目标机器必须满足：
-
-1. Windows（macOS 可作为开发验证）
+1. Windows（macOS/Linux 可用于开发）
 2. 已安装 Google Chrome
-3. 已安装 [Midscene Chrome 扩展](https://midscenejs.com/bridge-mode) 并切换到 Bridge 模式
-4. 业务系统已在 Chrome 中手工完成登录
-5. 建议使用专用电脑长期保持登录态与网络
+3. 已安装 [Midscene Chrome 扩展](https://midscenejs.com/bridge-mode) 并启用 Bridge
+4. 目标站点已在 Chrome 中手工登录（本产品不做自动登录）
+5. 建议使用 **专用或约定无人值守时段** 的机器，避免与人工操作抢同一浏览器会话
 
 ## 安装与运行（开发）
 
@@ -37,100 +35,61 @@ npm start
 
 ## 构建 Windows 安装包
 
-使用 `electron-builder` 直接打 Windows NSIS 安装器（`.exe`）。
+使用 `electron-builder` 生成 Windows NSIS 安装器（`.exe`）。
 
 ```bash
-# 在任何平台都能装依赖
 npm install
-
-# 仅打 Windows 64 位 NSIS 安装器
 npm run dist:win
-
-# 想要免安装的便携版（解压即用）
 npm run dist:win-portable
-
-# 同时打 macOS / Linux 等当前平台支持的所有目标
 npm run dist
 ```
 
-产出位置：`dist/` 目录下，文件名形如 `Bridge 巡检工作台-0.1.0-setup.exe`。
+产出在 `dist/` 目录。
 
-### 跨平台构建说明
+### 跨平台构建与签名
 
-- **在 Windows 上构建 Windows 包**：最稳，无需任何额外依赖。推荐 CI 与正式发版使用 Windows runner。
-- **在 macOS / Linux 上构建 Windows 包**：electron-builder 会自动下载 Wine 与 Mono 的便携包，第一次会比较慢；不需要做代码签名时可直接用。如果出现 `wine` 报错，可以本机装一下：
-  - macOS: `brew install --cask wine-stable`
-  - Linux (Debian/Ubuntu): `sudo apt-get install -y wine64 mono-devel`
-- **代码签名**：若需要 Windows Authenticode 签名，将证书放在本机并通过环境变量配置 `CSC_LINK` / `CSC_KEY_PASSWORD`，详见 [electron-builder 文档](https://www.electron.build/code-signing)。本仓库默认不启用签名。
+- 在 **Windows** 上打 Windows 包最省事。
+- 在 macOS/Linux 上打 Windows 包可能依赖 Wine/Mono，详见 [electron-builder](https://www.electron.build/)。
+- 代码签名：按需配置 `CSC_LINK` / `CSC_KEY_PASSWORD` 等，见官方文档。
 
 ### 自定义图标（可选）
 
-把图标放到仓库根目录的 `build/` 文件夹下，文件命名 electron-builder 会自动识别：
+将 `build/icon.ico`（Windows）、`build/icon.icns`（macOS）、`build/icon.png`（Linux）放入仓库 `build/`。
 
-- `build/icon.ico`（Windows）
-- `build/icon.icns`（macOS）
-- `build/icon.png`（Linux，建议 ≥ 512×512）
+### 用户数据目录
 
-不放图标也能正常打包，会使用 Electron 默认图标。
-
-### 用户数据落地
-
-应用运行时把所有数据（任务、配置、执行记录、Midscene 报告与截图）写到 Electron 标准的 `userData` 目录，而不是安装目录：
+数据写入 Electron `userData`（升级安装不丢任务与历史）：
 
 - Windows: `%APPDATA%\Bridge 巡检工作台\`
-- macOS:   `~/Library/Application Support/Bridge 巡检工作台/`
-- Linux:   `~/.config/Bridge 巡检工作台/`
+- macOS: `~/Library/Application Support/Bridge 巡检工作台/`
+- Linux: `~/.config/Bridge 巡检工作台/`
 
-这样升级安装包不会丢任务与历史记录。
+典型文件：`app-config.json`、`tasks.json`、`runs/`、`alerts.json`、`midscene_run/`。
 
-启动后（**普通用户路径**）：
+## 快速上手（普通用户）
 
-1. **设置 → 默认执行模型**：从「模型预设」下拉里挑「豆包 Doubao-Seed-2.0-mini-260215」（首推）或其他豆包型号 → 点「应用预设」→ 粘贴你的火山方舟 API Key → 保存。
-2. **任务 → 新建任务（AI 帮手）**：用一句话描述要监控什么，例如「每 10 分钟看 https://crm.example.com/dashboard 是否还能正常打开，并提取『今日订单数』，少于 10 单就提醒我」→ 点「生成任务」→ 一眼扫过摘要 → 点「保存任务」。
-3. **复杂交互场景**：在桌面 Chrome 用 Midscene 扩展的 **Recorder** 把下拉、滚动、点击的过程录一遍，把 **YAML 或 Playwright 代码任选一种** 粘到 AI 帮手对话框的「📜 操作流程」区（系统会自动识别格式），再写一句中文（例如「找到总剩余量，低于 38 万分钟报警」），AI 会把这段操作当作导航步骤，自动写好其后的 `aiQuery` 与告警规则。执行时严格按录制顺序复现，逐步上报；建议保留默认开启的「AI 兜底」，某步失败时自动用 `aiAct` 再试一次。
-4. 在桌面 Chrome 安装 [Midscene 扩展](https://midscenejs.com/bridge-mode) → 切到 Bridge 模式 → 点「允许连接」。
-5. 在应用里点「立即执行」或等待调度触发，结果会写到执行记录与告警中心。
+1. **设置 → 默认执行模型**：选预设或自填 Base URL、模型名、API Key → 保存。
+2. **任务 → 新建任务（AI 帮手）**：描述监控目标；若有下拉/筛选等，先在 Chrome 用 Recorder 录一段，把 **YAML 或 Playwright** 粘进「操作流程」再生成。
+3. Chrome 扩展切到 Bridge 并允许连接。
+4. 在应用内「立即执行」或等待调度；结果在 **执行记录** 与 **告警中心**。
 
-> 想精调？AI 生成后点「在向导里继续编辑」，或在任务列表点「高级模式」直接进入 5 步向导。
+## 任务执行流程（概念顺序）
 
-**模型说明**：豆包 Seed-2.0 是视觉多模态 + 结构化生成的旗舰系列，单模型即可同时承担「AI 任务生成 + 元素定位 + aiQuery / aiAssert / aiWaitFor」。如需进一步分层，可在「设置 → 高级模型策略」单独配置 Planning / Insight 模型。
-
-## 任务执行流程（固定模板）
-
-1. 连接 Bridge（`newTabWithUrl` 默认 / `currentTab` 调试）
-2. `aiWaitFor` 等待页面就绪
-3. （可选）按 Recorder 录制的步骤**逐步重放**：每步显式调用 `aiTap` / `aiScroll` / `aiInput` / `aiWaitFor` 等；失败可选 `aiAct` 自然语言兜底
-4. `aiAssert` 校验非登录页 / 非错误页 / 非空白页
-5. `aiQuery` 按 Prompt + Schema 提取结构化 JSON
-6. 规则引擎（`threshold` / `missing` / `expression`）按 `when` 决定是否触发告警
-7. 保存执行记录（提取结果 / 规则判定 / 各阶段耗时 / 日志 / 报告路径）
-8. 触发告警 / 恢复通知
-
-## 数据与存储
-
-所有文件在 Electron userData 下：
-
-- `app-config.json`：Bridge 端口、模型分层配置、通知偏好
-- `tasks.json`：任务列表
-- `runs/`：每次执行一个 JSON；同一任务保留最近 100 次
-- `runs/runs-index.json`：按 taskId 的 runId 倒序索引
-- `alerts.json`：告警状态机事件
-- `midscene_run/`：Midscene 生成的报告与截图
-
-## 关于模型配置
-
-- **默认执行模型**必填，必须是支持视觉的多模态模型，负责元素定位与所有未单独配置的意图。
-- **Planning 模型**（可选）：负责 `ai` / `aiAct` 的任务规划。不要假设它是纯文本 LLM，建议同样选择多模态模型。
-- **Insight 模型**（可选）：负责 `aiQuery` / `aiAssert` / `aiWaitFor` / `aiAsk`，对巡检取数尤为重要。
-- 三者按 Midscene 约定映射为 `MIDSCENE_MODEL_*` / `MIDSCENE_PLANNING_MODEL_*` / `MIDSCENE_INSIGHT_MODEL_*` 环境变量。
+1. 连接 Bridge（`newTabWithUrl` / `currentTab`）
+2. **无**操作流程时：`aiWaitFor(readyPrompt)`；**有**操作流程时：跳过本步，由流程内步骤负责就绪
+3. （可选）逐步重放 Recorder 步骤
+4. `aiAssert` 粗检非登录页 / 错误页
+5. `aiQuery` + Schema 提取 JSON（简单任务可弱化）
+6. 规则引擎判定
+7. 写执行记录、通知与告警
 
 ## 非目标（请勿回退）
 
-- ❌ 不提供 CDP / Launch / 内置 Chromium / 自动发现调试端口等选项。
-- ❌ 不把 Electron 作为目标业务系统的容器。
-- ❌ 不默认并发执行多个 Bridge 任务。
-- ❌ 不先做 YAML 编辑器。`YAML` 仅保留作为未来的辅助能力。
+- 不提供 CDP / Launch / 内置 Chromium / 自动发现调试端口。
+- 不把 Electron 当作业务系统主容器。
+- 不默认多任务并发抢同一 Bridge 会话。
+- 不把产品重心做成大型 YAML IDE。
 
-## 里程碑
+## 里程碑与详细进度
 
 见 [`progress.md`](./progress.md)。
