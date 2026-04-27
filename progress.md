@@ -37,21 +37,21 @@
 - [x] 导航：总览 / 任务 / 执行记录 / 告警 / 设置。
 - [x] AI 帮手 `task-generator.js` + 5 步向导；模型预设与高级 Planning / Insight。
 - [ ] 下一步 UI 布局：任务编辑页拆成「基础信息 / 进入目标状态 / 取数配置 / 规则与告警 / 调试预览」分区，避免把开发者取数、Recorder 和 `aiQuery` 混在一个大表单里。
-- [ ] 开发者取数 UI：请求配置、页面脚本、字段映射、测试结果四块上下文关联展示。
-- [ ] 执行详情 UI：按阶段展示 connect / flow / extract / rules，并在 extract 阶段区分接口 JSON、页面脚本、`aiQuery` 来源。
+- [x] 开发者取数 UI（向导第三步）：HTTP / 页面脚本、Headers/Body、执行前脚本、字段映射；与「测试执行一次」联动。
+- [x] 执行详情 extract 阶段：区分 `developer`（原始摘要、映射结果、完整 raw）与 `aiQuery`。
 
 ### 取数策略
 
 - [x] `aiQuery` + Schema + 规则引擎的视觉巡检主链。
-- [ ] 页面上下文 fetch / XHR / JS 取数：复用 Chrome 登录态、Cookie、页面 token 与当前业务上下文，直接返回 JSON / DOM 结果。
-- [ ] 接口取数字段映射：支持 JSONPath / JS 表达式 / 字段映射，把接口响应转换为规则引擎输入。
-- [ ] 开发者模式测试面板：粘贴 DevTools 中观察到的请求信息或页面脚本，立即执行一次并预览原始响应、提取结果和规则命中。
+- [x] 页面上下文 fetch / JS 取数（`evaluateJavaScript`）：任务可选「开发者取数」，在 Bridge 页面内执行 `fetch` 或自定义 async 脚本，复用登录态。
+- [x] 字段映射（路径 + JS 表达式，`raw` 为页面返回）：映射结果作为规则引擎输入；未配置映射时规则直接读原始返回。
+- [ ] 开发者模式测试面板增强：从响应一键生成映射行、DevTools 粘贴解析 headers 等（向导内已可配置并「测试执行一次」）。
 
 ---
 
 ## 进行中 / 近期
 
-- [ ] 开发者取数模式（可信内网优先）：页面上下文 fetch / XHR / JS、字段映射、测试执行、记录原始响应摘要。
+- [ ] 开发者取数收尾：XHR 形态、一键从响应生成映射、DevTools 粘贴解析；执行记录 Markdown 导出中对 developer 阶段的 richer 描述。
 - [ ] 任务导入导出（JSON 包等）。
 - [ ] Recorder 与流程编辑体验增强（在不大改「结构化任务为主」的前提下）。
 
