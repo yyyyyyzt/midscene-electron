@@ -1,12 +1,18 @@
 {
-  "name": "midscene-desktop-app",
+  "name": "bridge-inspection-workbench",
+  "productName": "Bridge 巡检工作台",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal Electron + Midscene.js desktop helper to drive Google Chrome with natural language",
+  "description": "Electron + Midscene Bridge 巡检工作台（Windows 专用值守电脑）",
   "type": "module",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win --x64",
+    "dist:win-portable": "electron-builder --win portable --x64",
+    "dist:mac": "electron-builder --mac",
+    "pack": "electron-builder --dir"
   },
   "engines": {
     "node": ">=20"
@@ -16,6 +22,51 @@
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {
-    "electron": "^35.1.0"
+    "electron": "^35.1.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.bridge-workbench.app",
+    "productName": "Bridge 巡检工作台",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "renderer/**/*",
+      "package.json",
+      "!**/.DS_Store",
+      "!**/*.map",
+      "!**/__tests__/**",
+      "!**/test/**"
+    ],
+    "extraMetadata": {
+      "main": "src/main.js"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bridge 巡检工作台"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
   }
 }
