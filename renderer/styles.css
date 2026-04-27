@@ -465,6 +465,17 @@ pre.log {
   margin-top: 0.3rem;
 }
 
+.dev-map-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+.dev-map-row input {
+  font-size: 0.8rem;
+}
+
 .hidden { display: none !important; }
 
 .toggle {

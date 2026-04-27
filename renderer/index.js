@@ -45,6 +45,49 @@ function fmtDuration(ms) {
   return `${m}m${rs}s`;
 }
 
+function defaultDeveloperExtract() {
+  return {
+    mode: 'http',
+    method: 'GET',
+    url: '',
+    headers: {},
+    body: '',
+    preScript: '',
+    pageScript: '',
+    fieldMappings: [],
+  };
+}
+
+function ensureDeveloperExtract(d) {
+  if (!d.developerExtract || typeof d.developerExtract !== 'object') {
+    d.developerExtract = defaultDeveloperExtract();
+  } else {
+    d.developerExtract = { ...defaultDeveloperExtract(), ...d.developerExtract };
+    if (!d.developerExtract.headers || typeof d.developerExtract.headers !== 'object') {
+      d.developerExtract.headers = {};
+    }
+    if (!Array.isArray(d.developerExtract.fieldMappings)) d.developerExtract.fieldMappings = [];
+  }
+}
+
+function devHeadersText(d) {
+  try {
+    return JSON.stringify(d.developerExtract?.headers || {}, null, 2);
+  } catch {
+    return '{}';
+  }
+}
+
+function renderDevMappingRows(mappings) {
+  const list = Array.isArray(mappings) && mappings.length ? mappings : [{ key: '', path: '', expression: '' }];
+  return list.map((m, i) => `<div class="dev-map-row" data-i="${i}">
+    <input class="dev-map-key" type="text" placeholder="输出字段名，如 stats.total" value="${escapeHtml(m.key || '')}" />
+    <input class="dev-map-path" type="text" placeholder="JSON 路径，如 data.items.0.count" value="${escapeHtml(m.path || '')}" />
+    <input class="dev-map-expr" type="text" placeholder="或 JS 表达式（优先），如 raw.json.total" value="${escapeHtml(m.expression || '')}" />
+    <button type="button" class="small danger ghost dev-map-del" title="删除">×</button>
+  </div>`).join('');
+}
+
 function escapeHtml(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -474,7 +517,22 @@ function renderPhaseTimeline(phases) {
       else if (typeof p.detail === 'string') detail = escapeHtml(p.detail);
       else if (p.detail && typeof p.detail === 'object') {
         if (p.name === 'connect') detail = `${escapeHtml(p.detail.runMode)} · ${escapeHtml(p.detail.entryUrl || '当前标签')}`;
-        else if (p.name === 'extract') detail = `<details class="collapse"><summary>查看提示词与返回</summary><div class="collapse-body"><label class="field">prompt</label><pre class="log">${escapeHtml(p.detail.prompt || '')}</pre><label class="field">value</label><pre class="log">${escapeHtml(JSON.stringify(p.detail.value, null, 2))}</pre></div></details>`;
+        else if (p.name === 'extract') {
+          if (p.detail?.extractSource === 'developer') {
+            const req = p.detail.requestSummary ? `<pre class="log">${escapeHtml(JSON.stringify(p.detail.requestSummary, null, 2))}</pre>` : '';
+            const mapErr = p.detail.mappingErrors?.length
+              ? `<div class="muted">映射警告：${escapeHtml(p.detail.mappingErrors.join('；'))}</div>`
+              : '';
+            detail = `<div><span class="status-pill paused">developer · ${escapeHtml(p.detail.developerMode || '')}</span> · ${p.detail.durationMs ?? '-'} ms</div>
+              ${req}
+              <label class="field">原始响应摘要</label><pre class="log">${escapeHtml(p.detail.rawSummary || '')}</pre>
+              <label class="field">字段映射结果（规则输入）</label><pre class="log">${escapeHtml(JSON.stringify(p.detail.mapped, null, 2))}</pre>
+              ${mapErr}
+              <details class="collapse"><summary>完整原始对象</summary><div class="collapse-body"><pre class="log">${escapeHtml(JSON.stringify(p.detail.rawFromPage, null, 2))}</pre></div></details>`;
+          } else {
+            detail = `<details class="collapse"><summary>查看提示词与返回</summary><div class="collapse-body"><label class="field">prompt</label><pre class="log">${escapeHtml(p.detail.prompt || '')}</pre><label class="field">value</label><pre class="log">${escapeHtml(JSON.stringify(p.detail.value, null, 2))}</pre></div></details>`;
+          }
+        }
         else if (p.name === 'flow') {
           const sr = p.detail.stepResults || [];
           const ok = sr.filter((s) => s.status === 'ok').length;
@@ -549,7 +607,11 @@ function buildRunMarkdown(rec) {
     if (p.status === 'error') note = p.error || '';
     else if (p.detail && typeof p.detail === 'object') {
       if (p.name === 'connect') note = `${p.detail.runMode} ${p.detail.entryUrl || ''}`;
-      else if (p.name === 'extract') note = `prompt 字数=${(p.detail.prompt || '').length}`;
+      else if (p.name === 'extract') {
+        note = p.detail?.extractSource === 'developer'
+          ? `developer · ${p.detail.developerMode || ''} · ${(p.detail.rawSummary || '').length} 字摘要`
+          : `prompt 字数=${(p.detail.prompt || '').length}`;
+      }
       else if (p.name === 'rules') note = `${p.detail.total} 条，触发 ${p.detail.triggered?.length || 0}`;
       else if (p.name === 'flow') {
         const sr = p.detail.stepResults || [];
@@ -628,7 +690,7 @@ async function openRunDetail(runId) {
       ${overview}
       <div class="section-title"><h3>① 阶段时间线</h3></div>
       ${renderPhaseTimeline(rec.phases || [])}
-      <div class="section-title"><h3>② 提取结果（aiQuery 返回值）</h3></div>
+      <div class="section-title"><h3>② 提取结果（规则判定输入）</h3></div>
       <pre class="log">${escapeHtml(JSON.stringify(rec.extracted, null, 2))}</pre>
       <div class="section-title"><h3>③ 规则判定（${triggered.length} / ${(rec.ruleResults || []).length} 触发）</h3></div>
       ${renderRuleResultsCards(rec.ruleResults || [])}
@@ -1097,10 +1159,12 @@ function renderTaskSummary(t) {
       <textarea rows="2" disabled>${escapeHtml(t.description || '（无）')}</textarea>
       <label class="field">页面就绪条件</label>
       <textarea rows="2" disabled>${escapeHtml(t.readyPrompt)}</textarea>
-      <label class="field">取数 Prompt</label>
-      <textarea rows="2" disabled>${escapeHtml(t.extractPrompt)}</textarea>
-      <label class="field">取数 Schema</label>
-      <textarea rows="2" disabled>${escapeHtml(t.extractSchema || '（未指定，模型自由返回）')}</textarea>
+      <label class="field">取数方式</label>
+      <input value="${t.extractMode === 'developer' ? '开发者取数（页面上下文）' : 'AI 视觉取数（aiQuery）'}" disabled />
+      ${t.extractMode === 'developer'
+        ? `<label class="field">开发者配置摘要</label><textarea rows="3" disabled>${escapeHtml(JSON.stringify(t.developerExtract || {}, null, 2))}</textarea>`
+        : `<label class="field">取数 Prompt</label><textarea rows="2" disabled>${escapeHtml(t.extractPrompt)}</textarea>
+      <label class="field">取数 Schema</label><textarea rows="2" disabled>${escapeHtml(t.extractSchema || '（未指定，模型自由返回）')}</textarea>`}
       ${flowSummary}
       <label class="field">规则（${ruleLines.length} 条）</label>
       <div class="muted" style="background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:.5rem .65rem">
@@ -1143,6 +1207,8 @@ function openTaskWizard(taskId, draftStart) {
     },
     alert: { enabled: true, repeatSuppressMinutes: 30 },
     paused: false,
+    extractMode: 'aiQuery',
+    developerExtract: defaultDeveloperExtract(),
   };
   const existing = taskId ? state.tasks.find((t) => t.id === taskId) : null;
   const seed = existing || draftStart || tpl;
@@ -1248,6 +1314,10 @@ function renderWizardBody(step, d) {
     `;
   }
   if (step === 2) {
+    ensureDeveloperExtract(d);
+    const dev = d.developerExtract;
+    const modeAi = d.extractMode !== 'developer';
+    const devHttp = dev.mode !== 'script';
     return `
       <label class="field">页面就绪条件（aiWaitFor）</label>
       <textarea id="f_readyPrompt" rows="2">${escapeHtml(d.readyPrompt)}</textarea>
@@ -1272,16 +1342,62 @@ function renderWizardBody(step, d) {
 
       <label class="field" style="margin-top:.6rem">粗粒度检查（aiAssert，用于排除登录页/错误页）</label>
       <textarea id="f_loginAssertPrompt" rows="2">${escapeHtml(d.loginAssertPrompt)}</textarea>
-      <label class="field">结构化提取 Prompt（aiQuery）</label>
-      <textarea id="f_extractPrompt" rows="3">${escapeHtml(d.extractPrompt)}</textarea>
-      <label class="field">返回 Schema（可选，自然语言描述）</label>
-      <textarea id="f_extractSchema" rows="3" placeholder='例：{ "orderCount": number, "todayAmount": number, "items": Array<{status:string,count:number}> }'>${escapeHtml(d.extractSchema)}</textarea>
-      <p class="hint">建议先按步骤用「测试执行一次」验证 Prompt 与 Schema 能稳定返回结构化数据，再到下一步配置规则。</p>
+
+      <div class="section-title" style="margin-top:.75rem"><h3 style="margin:0;font-size:1rem">取数方式</h3></div>
+      <p class="hint">开发者取数在<strong>已打开的 Chrome 页面上下文</strong>内执行 <code>fetch</code> 或自定义脚本，复用 Cookie 与登录态，适合内网接口；规则仍作用于下方「字段映射」后的 JSON（未配置映射时直接使用接口返回体）。设置页仍需填写默认模型配置（Midscene Agent 初始化要求），但本模式不会调用模型做取数。</p>
+      <div class="row" style="gap:1rem;flex-wrap:wrap;margin:.4rem 0">
+        <label class="toggle"><input type="radio" name="f_extractMode" id="f_extractMode_ai" value="aiQuery" ${modeAi ? 'checked' : ''} /> AI 视觉取数（aiQuery）</label>
+        <label class="toggle"><input type="radio" name="f_extractMode" id="f_extractMode_dev" value="developer" ${!modeAi ? 'checked' : ''} /> 开发者取数（页面上下文）</label>
+      </div>
+
+      <div id="wzAiExtractPanel" class="${modeAi ? '' : 'hidden'}">
+        <label class="field">结构化提取 Prompt（aiQuery）</label>
+        <textarea id="f_extractPrompt" rows="3">${escapeHtml(d.extractPrompt)}</textarea>
+        <label class="field">返回 Schema（可选，自然语言描述）</label>
+        <textarea id="f_extractSchema" rows="3" placeholder='例：{ "orderCount": number, "todayAmount": number, "items": Array<{status:string,count:number}> }'>${escapeHtml(d.extractSchema)}</textarea>
+        <p class="hint">建议用「测试执行一次」验证 Prompt 与 Schema 能稳定返回结构化数据。</p>
+      </div>
+
+      <div id="wzDevExtractPanel" class="${modeAi ? 'hidden' : ''}">
+        <label class="field">执行前脚本（可选，在取数前运行于页面内）</label>
+        <textarea id="f_devPreScript" rows="2" placeholder="例如从页面读取 token：window.__TOKEN__ = document.querySelector('#csrf')?.value">${escapeHtml(dev.preScript || '')}</textarea>
+        <div class="row" style="gap:1rem;flex-wrap:wrap;margin:.35rem 0">
+          <label class="toggle"><input type="radio" name="f_devMode" id="f_devMode_http" value="http" ${devHttp ? 'checked' : ''} /> HTTP 请求（相对 URL 相对当前页）</label>
+          <label class="toggle"><input type="radio" name="f_devMode" id="f_devMode_script" value="script" ${!devHttp ? 'checked' : ''} /> 页面脚本（async 函数体）</label>
+        </div>
+        <div id="wzDevHttpBlock" class="${devHttp ? '' : 'hidden'}">
+          <div class="row-2">
+            <div>
+              <label class="field">Method</label>
+              <select id="f_devMethod">
+                ${['GET','POST','PUT','PATCH','DELETE'].map((m) => `<option value="${m}" ${(dev.method || 'GET').toUpperCase() === m ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="field">URL</label>
+              <input id="f_devUrl" type="text" value="${escapeHtml(dev.url || '')}" placeholder="/api/stats 或 https://..." />
+            </div>
+          </div>
+          <label class="field">Headers（JSON 对象）</label>
+          <textarea id="f_devHeaders" rows="3" placeholder='{ "Content-Type": "application/json" }'>${escapeHtml(devHeadersText(d))}</textarea>
+          <label class="field">Body（非 GET 时作为请求体发送）</label>
+          <textarea id="f_devBody" rows="3" placeholder='{"range":"today"}'>${escapeHtml(dev.body || '')}</textarea>
+        </div>
+        <div id="wzDevScriptBlock" class="${devHttp ? 'hidden' : ''}">
+          <label class="field">页面上下文 JavaScript</label>
+          <p class="hint">写入 async IIFE 的<strong>函数体</strong>，需 <code>return</code> 或最后一行表达式为结果；可使用 <code>fetch</code>、<code>document</code> 等。</p>
+          <textarea id="f_devPageScript" rows="8" placeholder="return await fetch('/api/x').then(r => r.json());">${escapeHtml(dev.pageScript || '')}</textarea>
+        </div>
+        <label class="field" style="margin-top:.5rem">字段映射（可选，输出给规则引擎；留空则规则直接读接口 JSON）</label>
+        <p class="hint">每行：输出字段名、JSON 路径（从根对象起，如 <code>json.data.total</code>）、或 JS 表达式（变量 <code>raw</code> 为页面返回对象，表达式优先于路径）。</p>
+        <div id="wzDevMappings">${renderDevMappingRows(dev.fieldMappings)}</div>
+        <button type="button" class="small" id="wzDevMapAdd">+ 添加映射行</button>
+      </div>
     `;
   }
   if (step === 3) {
     return `
-      <p class="hint">规则作用于 aiQuery 返回的 JSON；支持数值阈值、缺失检查、JS 表达式（变量名 <code>data</code>）。</p>
+      <p class="hint">规则作用于<strong>字段映射之后</strong>的 JSON（开发者取数未配置映射时，为接口/脚本的原始返回）；支持数值阈值、缺失检查、JS 表达式（变量名 <code>data</code>）。</p>
       <div id="rulesBox">${d.rules.map(renderRuleRow).join('')}</div>
       <div class="row" style="margin-top:.5rem">
         <button class="small" data-add-rule="threshold">+ 数值阈值</button>
@@ -1362,6 +1478,36 @@ function renderRuleRow(rule) {
 
 function bindStepInputs(step, d) {
   if (step === 2) {
+    const syncExtractPanels = () => {
+      const ai = document.getElementById('f_extractMode_ai')?.checked;
+      document.getElementById('wzAiExtractPanel')?.classList.toggle('hidden', !ai);
+      document.getElementById('wzDevExtractPanel')?.classList.toggle('hidden', Boolean(ai));
+    };
+    const syncDevBlocks = () => {
+      const http = document.getElementById('f_devMode_http')?.checked;
+      document.getElementById('wzDevHttpBlock')?.classList.toggle('hidden', !http);
+      document.getElementById('wzDevScriptBlock')?.classList.toggle('hidden', Boolean(http));
+    };
+    document.querySelectorAll('input[name="f_extractMode"]').forEach((el) => {
+      el.addEventListener('change', syncExtractPanels);
+    });
+    document.querySelectorAll('input[name="f_devMode"]').forEach((el) => {
+      el.addEventListener('change', syncDevBlocks);
+    });
+    const mapBox = document.getElementById('wzDevMappings');
+    const bindMapDeletes = () => {
+      mapBox?.querySelectorAll('.dev-map-del').forEach((btn) => {
+        btn.onclick = () => {
+          const row = btn.closest('.dev-map-row');
+          if (mapBox.querySelectorAll('.dev-map-row').length > 1) row?.remove();
+        };
+      });
+    };
+    document.getElementById('wzDevMapAdd')?.addEventListener('click', () => {
+      mapBox?.insertAdjacentHTML('beforeend', renderDevMappingRows([{ key: '', path: '', expression: '' }]));
+      bindMapDeletes();
+    });
+    bindMapDeletes();
     document.getElementById('wzYamlPreview')?.addEventListener('click', async () => {
       const txt = document.getElementById('f_flowYaml').value.trim();
       const hint = document.getElementById('wzYamlHint');
@@ -1420,11 +1566,54 @@ function readStep(step, d, strict) {
   } else if (step === 2) {
     d.readyPrompt = document.getElementById('f_readyPrompt').value;
     d.loginAssertPrompt = document.getElementById('f_loginAssertPrompt').value;
-    d.extractPrompt = document.getElementById('f_extractPrompt').value;
-    d.extractSchema = document.getElementById('f_extractSchema').value;
     d.flowYaml = document.getElementById('f_flowYaml')?.value ?? d.flowYaml ?? '';
     const fb = document.getElementById('f_aiFallback');
     if (fb) d.aiFallback = fb.checked;
+    const modeEl = document.querySelector('input[name="f_extractMode"]:checked');
+    d.extractMode = modeEl?.value === 'developer' ? 'developer' : 'aiQuery';
+    ensureDeveloperExtract(d);
+    if (d.extractMode === 'aiQuery') {
+      d.extractPrompt = document.getElementById('f_extractPrompt')?.value ?? '';
+      d.extractSchema = document.getElementById('f_extractSchema')?.value ?? '';
+    } else {
+      d.developerExtract.preScript = document.getElementById('f_devPreScript')?.value ?? '';
+      const dm = document.querySelector('input[name="f_devMode"]:checked');
+      d.developerExtract.mode = dm?.value === 'script' ? 'script' : 'http';
+      d.developerExtract.method = document.getElementById('f_devMethod')?.value || 'GET';
+      d.developerExtract.url = document.getElementById('f_devUrl')?.value?.trim() ?? '';
+      const ht = document.getElementById('f_devHeaders')?.value?.trim() || '{}';
+      try {
+        const parsed = JSON.parse(ht);
+        d.developerExtract.headers = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        if (strict) {
+          alert('Headers 须为合法 JSON 对象');
+          return false;
+        }
+        d.developerExtract.headers = {};
+      }
+      d.developerExtract.body = document.getElementById('f_devBody')?.value ?? '';
+      d.developerExtract.pageScript = document.getElementById('f_devPageScript')?.value ?? '';
+      const mappings = [];
+      document.querySelectorAll('#wzDevMappings .dev-map-row').forEach((row) => {
+        const key = row.querySelector('.dev-map-key')?.value?.trim() || '';
+        const path = row.querySelector('.dev-map-path')?.value?.trim() || '';
+        const expression = row.querySelector('.dev-map-expr')?.value?.trim() || '';
+        if (!key && !path && !expression) return;
+        mappings.push({ key, path, expression });
+      });
+      d.developerExtract.fieldMappings = mappings;
+      if (strict) {
+        if (d.developerExtract.mode === 'http' && !d.developerExtract.url) {
+          alert('开发者取数（HTTP）：请填写 URL');
+          return false;
+        }
+        if (d.developerExtract.mode === 'script' && !d.developerExtract.pageScript.trim()) {
+          alert('开发者取数（脚本）：请填写页面上下文 JavaScript');
+          return false;
+        }
+      }
+    }
   } else if (step === 3) {
     const rows = document.querySelectorAll('#rulesBox [data-rule-id]');
     const rules = [];
