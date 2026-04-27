@@ -1,5 +1,8 @@
 node_modules/
 dist/
+out/
+.cache/
 *.log
 .DS_Store
 midscene_run/
+build/icons-cache/

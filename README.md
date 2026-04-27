@@ -35,6 +35,54 @@ npm install
 npm start
 ```
 
+## 构建 Windows 安装包
+
+使用 `electron-builder` 直接打 Windows NSIS 安装器（`.exe`）。
+
+```bash
+# 在任何平台都能装依赖
+npm install
+
+# 仅打 Windows 64 位 NSIS 安装器
+npm run dist:win
+
+# 想要免安装的便携版（解压即用）
+npm run dist:win-portable
+
+# 同时打 macOS / Linux 等当前平台支持的所有目标
+npm run dist
+```
+
+产出位置：`dist/` 目录下，文件名形如 `Bridge 巡检工作台-0.1.0-setup.exe`。
+
+### 跨平台构建说明
+
+- **在 Windows 上构建 Windows 包**：最稳，无需任何额外依赖。推荐 CI 与正式发版使用 Windows runner。
+- **在 macOS / Linux 上构建 Windows 包**：electron-builder 会自动下载 Wine 与 Mono 的便携包，第一次会比较慢；不需要做代码签名时可直接用。如果出现 `wine` 报错，可以本机装一下：
+  - macOS: `brew install --cask wine-stable`
+  - Linux (Debian/Ubuntu): `sudo apt-get install -y wine64 mono-devel`
+- **代码签名**：若需要 Windows Authenticode 签名，将证书放在本机并通过环境变量配置 `CSC_LINK` / `CSC_KEY_PASSWORD`，详见 [electron-builder 文档](https://www.electron.build/code-signing)。本仓库默认不启用签名。
+
+### 自定义图标（可选）
+
+把图标放到仓库根目录的 `build/` 文件夹下，文件命名 electron-builder 会自动识别：
+
+- `build/icon.ico`（Windows）
+- `build/icon.icns`（macOS）
+- `build/icon.png`（Linux，建议 ≥ 512×512）
+
+不放图标也能正常打包，会使用 Electron 默认图标。
+
+### 用户数据落地
+
+应用运行时把所有数据（任务、配置、执行记录、Midscene 报告与截图）写到 Electron 标准的 `userData` 目录，而不是安装目录：
+
+- Windows: `%APPDATA%\Bridge 巡检工作台\`
+- macOS:   `~/Library/Application Support/Bridge 巡检工作台/`
+- Linux:   `~/.config/Bridge 巡检工作台/`
+
+这样升级安装包不会丢任务与历史记录。
+
 启动后（**普通用户路径**）：
 
 1. **设置 → 默认执行模型**：从「模型预设」下拉里挑「豆包 Doubao-Seed-2.0-mini-260215」（首推）或其他豆包型号 → 点「应用预设」→ 粘贴你的火山方舟 API Key → 保存。
