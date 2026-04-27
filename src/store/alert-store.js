@@ -164,3 +164,31 @@ export function updateAlertState(userDataPath, id, action, silenceMinutes) {
 export function countUnresolved(userDataPath) {
   return load(userDataPath).filter((e) => e.state === 'active' || e.state === 'ack').length;
 }
+
+/**
+ * 删除指定告警事件。
+ * @param {string} userDataPath
+ * @param {string[]} ids
+ */
+export function deleteAlerts(userDataPath, ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return { ok: true, deleted: 0 };
+  const set = new Set(ids);
+  const list = load(userDataPath);
+  const next = list.filter((e) => !set.has(e.id));
+  save(userDataPath, next);
+  return { ok: true, deleted: list.length - next.length };
+}
+
+/**
+ * 清空告警。
+ *  - scope='all'        全清
+ *  - scope='resolved'   仅清已恢复
+ * @param {string} userDataPath
+ * @param {'all' | 'resolved'} [scope]
+ */
+export function clearAlerts(userDataPath, scope = 'all') {
+  const list = load(userDataPath);
+  const next = scope === 'resolved' ? list.filter((e) => e.state !== 'recovered') : [];
+  save(userDataPath, next);
+  return { ok: true, deleted: list.length - next.length };
+}

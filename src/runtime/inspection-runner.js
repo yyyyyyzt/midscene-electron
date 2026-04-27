@@ -1,6 +1,7 @@
 import { createBridgeAgent } from './chrome-runner.js';
 import { evaluateRules } from './rule-engine.js';
-import { parseYamlFlow, buildRunnableYaml } from './yaml-flow.js';
+import { parseFlowInput } from './yaml-flow.js';
+import { runSteps } from './step-runner.js';
 
 /**
  * 跑一次完整的巡检任务：
@@ -125,29 +126,35 @@ export async function runInspection(ctx) {
       }
 
       if (task.flowYaml && task.flowYaml.trim()) {
-        await runPhase(PHASE.FLOW, '操作流程 YAML', async () => {
-          const parsed = parseYamlFlow(task.flowYaml);
+        await runPhase(PHASE.FLOW, '操作流程（逐步重放）', async () => {
+          const parsed = parseFlowInput(task.flowYaml);
           if (!parsed.ok) {
             throw new Error(parsed.error);
           }
-          if (parsed.warnings.length) {
-            for (const w of parsed.warnings) log(`flow 警告：${w}`);
+          for (const w of parsed.warnings || []) log(`flow 警告：${w}`);
+          log(`即将逐步重放 ${parsed.steps.length} 步（来源 ${parsed.source}）…`);
+          const result = await runSteps({
+            agent,
+            steps: parsed.steps,
+            aiFallback: task.aiFallback !== false,
+            log,
+          });
+          if (!result.ok && result.firstError) {
+            const idx = result.firstError.stepIndex;
+            const step = parsed.steps[idx];
+            throw new Error(
+              `第 ${idx + 1}/${parsed.steps.length} 步失败：[${step?.action}] ${step?.locate || step?.prompt || ''} → ${result.firstError.message}`,
+            );
           }
-          const runnable = buildRunnableYaml(parsed.flow, task.name || '巡检流程');
-          log(`即将执行 ${parsed.flow.length} 步 flow（依赖 Midscene runYaml）…`);
-          if (typeof agent.runYaml !== 'function') {
-            throw new Error('当前 Midscene 版本不支持 agent.runYaml；请升级 @midscene/web');
-          }
-          const result = await agent.runYaml(runnable);
           return {
-            steps: parsed.flow.length,
+            source: parsed.source,
+            total: parsed.steps.length,
             warnings: parsed.warnings,
-            yaml: runnable,
-            result: summarizeYamlResult(result),
+            stepResults: result.stepResults,
           };
         });
       } else {
-        skipPhase(PHASE.FLOW, '操作流程 YAML', '未配置 flowYaml');
+        skipPhase(PHASE.FLOW, '操作流程（逐步重放）', '未配置 flow');
       }
 
       if (task.loginAssertPrompt?.trim()) {
@@ -217,18 +224,6 @@ export async function runInspection(ctx) {
       }
     }
   })(), timeoutMs);
-}
-
-function summarizeYamlResult(result) {
-  if (!result || typeof result !== 'object') return null;
-  /** runYaml 通常返回 { result: { taskName: { stepName: value, ... } } }；保留浅拷贝以便记录 */
-  try {
-    const json = JSON.stringify(result);
-    if (json.length > 4000) return JSON.parse(json.slice(0, 0)) || { tooLarge: true };
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
 }
 
 /**

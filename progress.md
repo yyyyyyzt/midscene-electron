@@ -57,11 +57,23 @@
 ## 里程碑 M7 — 复杂交互：YAML 操作流程
 
 - [x] 引入 `js-yaml` + `runtime/yaml-flow.js`：解析 Recorder YAML（兼容完整 yaml / 仅 tasks / 仅 flow），抽取 `web.url / viewport`，描述每一步用于 UI 预览。
-- [x] `InspectionTask.flowYaml` 字段；inspection-runner 在 `aiWaitFor` 与 `aiAssert` 之间新增 `flow` 阶段，调用 `agent.runYaml(...)` 直接重放下拉/滚动/点击等指令。
+- [x] `InspectionTask.flowYaml` 字段；inspection-runner 在 `aiWaitFor` 与 `aiAssert` 之间新增 `flow` 阶段。
 - [x] AI 帮手对话框增加可选「YAML 输入区」+「解析并预览」按钮；YAML 步骤摘要列表（动作 + 定位）。
 - [x] 5 步向导第 3 步同时支持 YAML 粘贴 + 预览，与就绪/取数共用一屏。
-- [x] 任务列表卡片显示「📜 含 YAML 流程」标记；详情弹窗的 phases 时间线展示 flow 步数与可折叠 YAML。
+- [x] 任务列表卡片显示「📜 含 流程」标记；详情弹窗的 phases 时间线展示 flow 步数。
 - [x] task-generator 同时接收描述与 YAML，合成完整任务（entryUrl / extractPrompt / extractSchema / rules / flowYaml）。
+
+## 里程碑 M8 — 严格按 Recorder 复现 + Playwright 代码 + AI 兜底
+
+> 反馈：YAML 黑盒整体执行（runYaml）容易在某一步出错却看不到位置；同时 Recorder 还会产出 Playwright 代码，本质和 YAML 一样都是 ai* 调用列表，但更直观。
+
+- [x] 新增 `runtime/playwright-parser.js`：纯正则 + 平衡括号 + JSON 修补，提取 `page.goto / setViewportSize` 与 `aiTap / aiScroll / aiInput / aiKeyboardPress / aiWaitFor / aiAssert / aiQuery / aiAct / sleep` 调用。
+- [x] `runtime/yaml-flow.js` 新增统一入口 `parseFlowInput`：自动识别 YAML / Playwright，输出与 step-runner 同构的 step 数组。
+- [x] 新增 `runtime/step-runner.js`：**严格按录制顺序**逐步调用 `agent.aiTap/aiScroll/...`，每步 `onStep` + 结构化 StepResult；任务可开 `aiFallback`，失败时退回 `agent.aiAct(自然语言)` 一次性补救。
+- [x] `inspection-runner` 的 flow 阶段改用 step-runner，错误信息精确到「第 X/Y 步：[action] 定位 → 错误」。
+- [x] `task-store.aiFallback` 字段；5 步向导加复选框；任务卡片显示来源（YAML / PW）。
+- [x] 详情弹窗 flow 阶段展开后展示**逐步表格**（动作 / 定位 / 状态 / 耗时 / 错误 / 兜底错误）；Markdown 复制也带逐步表，方便贴给模型 debug。
+- [x] IPC `yaml:parse` → `flow:parse`；返回 source 标识；前端「解析并预览」按钮文案改为「解析并预览步骤」。
 
 ## 里程碑 M6 — 规则语义修正与执行格式化
 

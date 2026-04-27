@@ -1,4 +1,5 @@
 import yaml from 'js-yaml';
+import { parsePlaywrightCode } from './playwright-parser.js';
 
 /**
  * Midscene YAML 流程解析器。
@@ -132,6 +133,159 @@ export function buildRunnableYaml(flow, taskName = '巡检流程') {
 }
 
 /**
+ * 把 yaml flow 数组（Midscene yaml 形态）规范化成 step-runner 用的统一 step 形态。
+ * 与 playwright-parser 输出同构，便于 step-runner 单一执行路径。
+ *
+ * @param {any[]} flow
+ * @returns {any[]}
+ */
+export function yamlFlowToSteps(flow) {
+  if (!Array.isArray(flow)) return [];
+  /** @type {any[]} */
+  const steps = [];
+  for (const node of flow) {
+    if (!node || typeof node !== 'object') continue;
+    if ('aiWaitFor' in node) {
+      steps.push({
+        action: 'aiWaitFor',
+        prompt: typeof node.aiWaitFor === 'string' ? node.aiWaitFor : (node.aiWaitFor?.prompt || ''),
+        timeoutMs: Number(node.timeout) || 30000,
+        raw: yamlOneLine({ aiWaitFor: node.aiWaitFor, timeout: node.timeout }),
+      });
+    } else if ('aiTap' in node || 'aiHover' in node) {
+      const action = 'aiTap' in node ? 'aiTap' : 'aiHover';
+      const v = node[action];
+      let locate, opts;
+      if (typeof v === 'string') {
+        locate = v;
+        opts = { ...node }; delete opts[action];
+      } else if (v && typeof v === 'object') {
+        locate = v.locate?.prompt || v.prompt || v.locate || '';
+        opts = v;
+      } else {
+        locate = String(v ?? '');
+      }
+      steps.push({ action, locate, options: opts, raw: yamlOneLine({ [action]: v }) });
+    } else if ('aiInput' in node) {
+      const v = node.aiInput;
+      let locate;
+      let value = node.value ?? '';
+      if (typeof v === 'string') locate = v;
+      else if (v && typeof v === 'object') {
+        locate = v.locate?.prompt || v.prompt || v.locate || '';
+      }
+      steps.push({ action: 'aiInput', locate, value: String(value), raw: yamlOneLine({ aiInput: v, value }) });
+    } else if ('aiKeyboardPress' in node) {
+      const v = node.aiKeyboardPress;
+      const locate = typeof v === 'string' ? v : (v?.locate?.prompt || v?.prompt || '');
+      steps.push({ action: 'aiKeyboardPress', locate, keyName: node.keyName || '', raw: yamlOneLine({ aiKeyboardPress: v, keyName: node.keyName }) });
+    } else if ('aiScroll' in node) {
+      const v = node.aiScroll;
+      let locate, dir, scrollType, distance;
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        locate = v.locate?.prompt || v.prompt || v.locate || '';
+        dir = v.direction;
+        scrollType = v.scrollType;
+        distance = typeof v.distance === 'number' ? v.distance : undefined;
+      } else if (typeof v === 'string') {
+        locate = v;
+      }
+      // 老 yaml 风格也可能把这些参数平铺在 step 上
+      dir = dir || node.direction;
+      scrollType = scrollType || node.scrollType;
+      if (typeof node.distance === 'number') distance = node.distance;
+      if (!locate && typeof node.locate === 'string') locate = node.locate;
+      steps.push({
+        action: 'aiScroll',
+        locate: locate || '',
+        direction: dir || 'down',
+        scrollType: scrollType || 'singleAction',
+        distance,
+        raw: yamlOneLine({ aiScroll: v, direction: dir, scrollType, distance, locate }),
+      });
+    } else if ('aiAssert' in node) {
+      const v = node.aiAssert;
+      const prompt = typeof v === 'string' ? v : (v?.prompt || '');
+      steps.push({ action: 'aiAssert', prompt, raw: yamlOneLine({ aiAssert: v }) });
+    } else if ('aiQuery' in node) {
+      const v = node.aiQuery;
+      const prompt = typeof v === 'string' ? v : (v?.prompt || '');
+      steps.push({ action: 'aiQuery', prompt, raw: yamlOneLine({ aiQuery: v }) });
+    } else if ('ai' in node || 'aiAct' in node) {
+      const key = 'ai' in node ? 'ai' : 'aiAct';
+      const v = node[key];
+      const prompt = typeof v === 'string' ? v : (v?.prompt || '');
+      steps.push({ action: 'aiAct', prompt, raw: yamlOneLine({ [key]: v }) });
+    } else if ('sleep' in node) {
+      steps.push({ action: 'sleep', ms: Number(node.sleep) || 0, raw: `sleep: ${node.sleep}` });
+    } else {
+      steps.push({ action: 'unknown', raw: yamlOneLine(node) });
+    }
+  }
+  return steps;
+}
+
+function describeNormalizedStep(step, idx) {
+  const a = step.action;
+  let summary = '';
+  if (a === 'sleep') summary = `${step.ms || 0} ms`;
+  else if (a === 'aiScroll') {
+    const parts = [];
+    if (step.locate) parts.push(`locate=${step.locate}`);
+    if (step.direction) parts.push(`dir=${step.direction}`);
+    if (step.distance) parts.push(`${step.distance}px`);
+    if (step.scrollType) parts.push(`[${step.scrollType}]`);
+    summary = parts.join(' ');
+  } else if (a === 'aiInput') {
+    summary = `${step.locate || ''} ← "${step.value || ''}"`;
+  } else if (a === 'aiKeyboardPress') {
+    summary = `${step.locate || ''} → ${step.keyName || ''}`;
+  } else {
+    summary = step.locate || step.prompt || '';
+  }
+  return { index: idx, action: a, summary: String(summary).slice(0, 200) };
+}
+
+function yamlOneLine(o) {
+  try {
+    return yaml.dump(o, { lineWidth: 200 }).replace(/\n/g, ' ').trim();
+  } catch {
+    return JSON.stringify(o);
+  }
+}
+
+/**
+ * 一站式：判断输入是 YAML 还是 Playwright 代码，统一返回 step 数组。
+ *
+ * @param {string} text
+ * @returns {{ ok: true; flow: any[]; steps: any[]; meta: any; warnings: string[]; source: 'yaml' | 'playwright' } | { ok: false; error: string }}
+ */
+export function parseFlowInput(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return { ok: false, error: '输入为空' };
+
+  const looksLikePlaywright =
+    /(@playwright\/test|@midscene\/web\/playwright|test\s*\(|page\.goto|setViewportSize)/.test(raw);
+
+  if (looksLikePlaywright) {
+    const r = parsePlaywrightCode(raw);
+    if (!r.ok) return r;
+    return { ok: true, source: 'playwright', flow: r.flow, steps: r.flow, meta: r.meta, warnings: r.warnings };
+  }
+
+  const r = parseYamlFlow(raw);
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    source: 'yaml',
+    flow: r.flow,
+    steps: yamlFlowToSteps(r.flow),
+    meta: r.meta,
+    warnings: r.warnings,
+  };
+}
+
+/**
  * 给 UI 展示用的步骤摘要。
  *
  * @param {any[]} flow
@@ -139,6 +293,13 @@ export function buildRunnableYaml(flow, taskName = '巡检流程') {
 export function describeFlow(flow) {
   if (!Array.isArray(flow)) return [];
   return flow.map((step, idx) => {
+    // 已经是规范 step（含 action 字段）
+    if (step && typeof step === 'object' && typeof step.action === 'string' && !SUPPORTED_KEYS.has(step.action)) {
+      return describeNormalizedStep(step, idx);
+    }
+    if (step && typeof step === 'object' && typeof step.action === 'string' && (step.locate || step.prompt || step.action === 'sleep')) {
+      return describeNormalizedStep(step, idx);
+    }
     const keys = Object.keys(step || {});
     const action = keys.find((k) => SUPPORTED_KEYS.has(k)) || keys[0] || 'unknown';
     let summary = '';

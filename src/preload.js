@@ -17,15 +17,18 @@ contextBridge.exposeInMainWorld('desktopApi', {
   getRun: (id) => ipcRenderer.invoke('run:get', id),
   openReport: (p) => ipcRenderer.invoke('run:openReport', p),
   stats: () => ipcRenderer.invoke('run:stats'),
+  deleteRuns: (runIds) => ipcRenderer.invoke('run:delete', runIds),
+  clearRuns: (taskId) => ipcRenderer.invoke('run:clear', taskId || null),
 
   listAlerts: () => ipcRenderer.invoke('alert:list'),
   updateAlertState: (id, action, minutes) =>
     ipcRenderer.invoke('alert:update', { id, action, minutes }),
+  deleteAlerts: (ids) => ipcRenderer.invoke('alert:delete', ids),
+  clearAlerts: (scope) => ipcRenderer.invoke('alert:clear', scope || 'all'),
 
-  listPresets: () => ipcRenderer.invoke('preset:list'),
   generateTask: (description, flowYaml) =>
     ipcRenderer.invoke('task:generate', { description, flowYaml }),
-  parseYaml: (text) => ipcRenderer.invoke('yaml:parse', text),
+  parseFlow: (text) => ipcRenderer.invoke('flow:parse', text),
 
   onSchedulerEvent: (cb) => {
     const listener = (_e, payload) => cb(payload);
