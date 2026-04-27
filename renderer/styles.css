@@ -430,16 +430,16 @@ pre.log {
 
 .rule-row {
   display: grid;
-  grid-template-columns: 110px 1fr 100px 1fr 100px auto;
+  grid-template-columns: 110px 170px 1fr 90px 1fr 110px auto;
   gap: 0.5rem;
   align-items: center;
   margin-bottom: 0.5rem;
 }
 .rule-row.expression {
-  grid-template-columns: 110px 1fr 100px auto;
+  grid-template-columns: 110px 170px 1fr 110px auto;
 }
 .rule-row.missing {
-  grid-template-columns: 110px 1fr 1fr 100px auto;
+  grid-template-columns: 110px 170px 1fr 1fr 110px auto;
 }
 
 .task-card {

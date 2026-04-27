@@ -40,17 +40,37 @@ const SYSTEM_PROMPT = `你是一个浏览器巡检任务生成助手。
   }
 }
 
+【规则语义 · 极其重要】
+每条规则都是「告警条件」，即「条件成立时触发告警」。请用 when 显式标注：
+  - when="fail"（推荐 · 默认）：条件成立就报警。例如「余额 < 10 就报警」请生成
+        {"type":"threshold","when":"fail","field":"balance","op":"<","value":10}
+  - when="pass"：条件成立才算通过。仅当用户明确表述「期望成立」「应该 xxx」时才用。
+不要用反向思维写阈值。用户说「< 10 报警」就直接写 op:"<" + value:10 + when:"fail"，
+**不要**改成 op:">=" 让它通过。
+
 RuleDef 三选一：
-  数值阈值: { "id": "rXXXX", "type": "threshold", "field": "字段路径", "op": ">|>=|<|<=|==|!=|between", "value": number|string, "value2"?: number, "severity": "info|warning|critical", "message"?: string }
-  字段缺失: { "id": "rXXXX", "type": "missing", "field": "字段路径", "severity": "info|warning|critical", "message"?: string }
-  JS 表达式: { "id": "rXXXX", "type": "expression", "expression": "data.xxx > 0", "severity": "info|warning|critical", "message"?: string }
+  数值阈值: { "id": "rXXXX", "type": "threshold", "when": "fail"|"pass", "field": "字段路径", "op": ">|>=|<|<=|==|!=|between", "value": number|string, "value2"?: number, "severity": "info|warning|critical", "message"?: string }
+  字段缺失: { "id": "rXXXX", "type": "missing", "when": "fail", "field": "字段路径", "severity": "info|warning|critical", "message"?: string }
+  JS 表达式: { "id": "rXXXX", "type": "expression", "when": "fail"|"pass", "expression": "data.xxx < 10", "severity": "info|warning|critical", "message"?: string }
 
 写规则时务必保证：
   - extractSchema 描述的字段名要和 rules 里的 field 完全一致；
-  - 用户没说阈值就猜一个合理的兜底值，并把 severity 设为 warning；
-  - 如果是「页面有没有 X」的需求，使用 missing 规则；
-  - 如果是「X 比上次少多少」之类需要历史的，先用 expression 写，但只允许引用 data；
-  - 默认 runMode 为 newTabWithUrl；只有用户明确说「我已经打开页面」「当前标签」才用 currentTab。
+  - severity 默认 warning；用户用「严重 / 立刻 / 紧急」等词汇时升级为 critical；
+  - 如果是「字段缺失/页面没有显示 X」的需求，使用 missing 规则（默认 when=fail）；
+  - 默认 runMode 为 newTabWithUrl；只有用户明确说「我已经打开页面」「当前标签」才用 currentTab；
+  - 规则的 message 字段写一句中文，给值班人员看的告警标题。
+
+【示例】
+用户："监控 https://x.example/finance，余额低于 10 元就提醒我"
+应输出（节选）:
+  "rules":[{"id":"r_low_balance","type":"threshold","when":"fail","field":"balance","op":"<","value":10,"severity":"warning","message":"账户余额低于阈值"}]
+
+用户："看下 https://crm.example/orders 今天订单数还正常吗，少于 50 单就报警，0 单立即报警"
+应输出（节选）:
+  "rules":[
+    {"id":"r_low","type":"threshold","when":"fail","field":"orderCount","op":"<","value":50,"severity":"warning","message":"今日订单偏少"},
+    {"id":"r_zero","type":"threshold","when":"fail","field":"orderCount","op":"==","value":0,"severity":"critical","message":"今日订单为零"}
+  ]
 
 只输出 JSON 对象，禁止任何解释、Markdown、代码块标记。`;
 
@@ -182,12 +202,12 @@ function mergeWithTemplate(parsed) {
       .map((r, idx) => {
         const id = typeof r.id === 'string' && r.id ? r.id : `r_${Date.now().toString(36)}_${idx}`;
         const severity = ['info', 'warning', 'critical'].includes(r.severity) ? r.severity : 'warning';
+        const when = r.when === 'pass' ? 'pass' : 'fail';
         if (r.type === 'threshold') {
           return {
-            id,
-            type: 'threshold',
+            id, type: 'threshold', when,
             field: String(r.field || ''),
-            op: ['>', '>=', '<', '<=', '==', '!=', 'between'].includes(r.op) ? r.op : '>=',
+            op: ['>', '>=', '<', '<=', '==', '!=', 'between'].includes(r.op) ? r.op : '<',
             value: r.value,
             value2: r.value2,
             severity,
@@ -196,16 +216,14 @@ function mergeWithTemplate(parsed) {
         }
         if (r.type === 'missing') {
           return {
-            id,
-            type: 'missing',
+            id, type: 'missing', when,
             field: String(r.field || ''),
             severity,
             message: typeof r.message === 'string' ? r.message : undefined,
           };
         }
         return {
-          id,
-          type: 'expression',
+          id, type: 'expression', when,
           expression: typeof r.expression === 'string' ? r.expression : '',
           severity,
           message: typeof r.message === 'string' ? r.message : undefined,

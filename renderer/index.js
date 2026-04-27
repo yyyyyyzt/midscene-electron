@@ -352,17 +352,21 @@ function renderRunsTable(runs, compact) {
   if (!runs.length) return '<div class="empty">暂无执行记录。</div>';
   return `<table class="table">
     <thead><tr>
-      <th>任务</th><th>开始</th><th>耗时</th><th>状态</th><th>命中规则</th><th></th>
+      <th>任务</th><th>开始</th><th>耗时</th><th>状态</th><th>规则</th><th></th>
     </tr></thead>
     <tbody>
       ${runs.map((r) => {
-        const failed = (r.ruleResults || []).filter((x) => !x.ok).length;
+        const total = (r.ruleResults || []).length;
+        const triggered = (r.ruleResults || []).filter((x) => x.triggered ?? !x.ok).length;
+        const tCell = total
+          ? (triggered ? `<span class="status-pill alert">${triggered} / ${total} 触发</span>` : `<span class="status-pill ok">${total} 条 全部未触发</span>`)
+          : '-';
         return `<tr>
           <td>${escapeHtml(r.taskName)}</td>
           <td>${fmtTime(r.startedAt)}</td>
           <td>${fmtDuration(r.durationMs)}</td>
           <td>${statusPill(r.status)}</td>
-          <td>${failed ? `<span class="status-pill alert">${failed}</span>` : (r.status === 'ok' ? '-' : '-')}</td>
+          <td>${tCell}</td>
           <td class="row" style="justify-content:flex-end;gap:.35rem">
             <button class="small" data-run-view="${r.id}">详情</button>
             ${r.reportPath ? `<button class="small" data-run-report="${escapeHtml(r.reportPath)}">报告</button>` : ''}
@@ -373,35 +377,160 @@ function renderRunsTable(runs, compact) {
   </table>`;
 }
 
+function renderPhaseTimeline(phases) {
+  if (!phases?.length) return '<div class="muted">无阶段记录</div>';
+  return `<table class="table">
+    <thead><tr><th>步骤</th><th>状态</th><th>耗时</th><th>详情</th></tr></thead>
+    <tbody>${phases.map((p) => {
+      const cls = p.status === 'ok' ? 'ok' : p.status === 'error' ? 'err' : 'paused';
+      const label = p.status === 'ok' ? '完成' : p.status === 'error' ? '失败' : '跳过';
+      let detail = '';
+      if (p.status === 'error') detail = escapeHtml(p.error || '');
+      else if (typeof p.detail === 'string') detail = escapeHtml(p.detail);
+      else if (p.detail && typeof p.detail === 'object') {
+        if (p.name === 'connect') detail = `${escapeHtml(p.detail.runMode)} · ${escapeHtml(p.detail.entryUrl || '当前标签')}`;
+        else if (p.name === 'extract') detail = `<details class="collapse"><summary>查看提示词与返回</summary><div class="collapse-body"><label class="field">prompt</label><pre class="log">${escapeHtml(p.detail.prompt || '')}</pre><label class="field">value</label><pre class="log">${escapeHtml(JSON.stringify(p.detail.value, null, 2))}</pre></div></details>`;
+        else if (p.name === 'rules') detail = `${p.detail.total} 条规则，触发 ${p.detail.triggered?.length || 0} 条`;
+        else if (p.detail.prompt) detail = escapeHtml(p.detail.prompt);
+      }
+      return `<tr>
+        <td>${escapeHtml(p.label)}</td>
+        <td><span class="status-pill ${cls}">${label}</span></td>
+        <td>${fmtDuration(p.durationMs)}</td>
+        <td>${detail}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function renderRuleResultsCards(rs) {
+  if (!rs?.length) return '<div class="muted">无规则</div>';
+  return rs.map((r) => {
+    const triggered = r.triggered ?? !r.ok;
+    const headPill = triggered
+      ? `<span class="status-pill alert">已触发</span>`
+      : `<span class="status-pill ok">未触发</span>`;
+    const whenLabel = (r.when || 'fail') === 'pass' ? '条件成立 → 通过' : '条件成立 → 报警';
+    return `<div class="card" style="margin-bottom:.6rem">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="gap:.4rem">
+          <strong>${escapeHtml(r.ruleId)}</strong>
+          <span class="status-pill ${r.severity === 'critical' ? 'err' : r.severity === 'info' ? 'paused' : 'alert'}">${escapeHtml(r.severity)}</span>
+          <span class="muted">[${escapeHtml(r.ruleType || '')}]</span>
+          <span class="muted">${escapeHtml(whenLabel)}</span>
+        </div>
+        ${headPill}
+      </div>
+      <dl class="kv" style="margin-top:.5rem">
+        <dt>条件</dt><dd>${escapeHtml(r.conditionLabel || '')}</dd>
+        <dt>条件成立</dt><dd>${r.conditionMet ? '是' : '否'}</dd>
+        <dt>实际值</dt><dd><code>${escapeHtml(JSON.stringify(r.actual))}</code></dd>
+        <dt>结论</dt><dd>${escapeHtml(r.message)}</dd>
+        ${r.error ? `<dt>错误</dt><dd>${escapeHtml(r.error)}</dd>` : ''}
+      </dl>
+    </div>`;
+  }).join('');
+}
+
+function buildRunMarkdown(rec) {
+  const triggered = (rec.ruleResults || []).filter((r) => r.triggered ?? !r.ok);
+  const lines = [];
+  lines.push(`# 巡检记录 · ${rec.taskName}`);
+  lines.push('');
+  lines.push(`- 状态: **${rec.status}**`);
+  lines.push(`- 开始: ${new Date(rec.startedAt).toISOString()}`);
+  lines.push(`- 结束: ${rec.finishedAt ? new Date(rec.finishedAt).toISOString() : '-'}`);
+  lines.push(`- 耗时: ${rec.durationMs ?? '-'} ms`);
+  lines.push(`- 错误: ${rec.error || '无'}`);
+  lines.push(`- 报告: ${rec.reportPath || '无'}`);
+  lines.push('');
+  lines.push('## 阶段时间线');
+  lines.push('| 步骤 | 状态 | 耗时 | 备注 |');
+  lines.push('|---|---|---|---|');
+  for (const p of rec.phases || []) {
+    let note = '';
+    if (p.status === 'error') note = p.error || '';
+    else if (p.detail && typeof p.detail === 'object') {
+      if (p.name === 'connect') note = `${p.detail.runMode} ${p.detail.entryUrl || ''}`;
+      else if (p.name === 'extract') note = `prompt 字数=${(p.detail.prompt || '').length}`;
+      else if (p.name === 'rules') note = `${p.detail.total} 条，触发 ${p.detail.triggered?.length || 0}`;
+    }
+    lines.push(`| ${p.label} | ${p.status} | ${p.durationMs} ms | ${note.replace(/\|/g, '\\|')} |`);
+  }
+  lines.push('');
+  lines.push('## 提取结果');
+  lines.push('```json');
+  lines.push(JSON.stringify(rec.extracted, null, 2));
+  lines.push('```');
+  lines.push('');
+  lines.push(`## 规则判定（共 ${(rec.ruleResults || []).length} 条，触发 ${triggered.length} 条）`);
+  for (const r of rec.ruleResults || []) {
+    const trig = r.triggered ?? !r.ok;
+    lines.push(`### ${r.ruleId} · ${r.ruleType || ''} · ${r.severity} · when=${r.when || 'fail'} · ${trig ? '已触发' : '未触发'}`);
+    lines.push(`- 条件: ${r.conditionLabel || ''}`);
+    lines.push(`- 条件成立: ${r.conditionMet ? '是' : '否'}`);
+    lines.push(`- 实际值: \`${JSON.stringify(r.actual)}\``);
+    lines.push(`- 结论: ${r.message}`);
+    if (r.error) lines.push(`- 错误: ${r.error}`);
+    lines.push('');
+  }
+  lines.push('## 执行日志');
+  lines.push('```');
+  lines.push((rec.log || []).join('\n'));
+  lines.push('```');
+  return lines.join('\n');
+}
+
 async function openRunDetail(runId) {
   const rec = await api.getRun(runId);
   if (!rec) return alert('记录不存在');
+  const triggered = (rec.ruleResults || []).filter((r) => r.triggered ?? !r.ok);
+  const overview = `
+    <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:.4rem">
+      <div class="row" style="gap:.5rem">
+        ${statusPill(rec.status)}
+        <strong>${escapeHtml(rec.taskName)}</strong>
+        <span class="muted">${fmtTime(rec.startedAt)} → ${fmtTime(rec.finishedAt)}</span>
+      </div>
+      <div class="row" style="gap:.4rem">
+        <button class="small" id="copyMdBtn">复制为 Markdown</button>
+        ${rec.reportPath ? '<button class="small" id="openReportBtn">打开 Midscene 报告</button>' : ''}
+      </div>
+    </div>
+    <dl class="kv" style="margin-top:.6rem">
+      <dt>耗时</dt><dd>${fmtDuration(rec.durationMs)}</dd>
+      <dt>规则触发</dt><dd>${triggered.length} / ${(rec.ruleResults || []).length}</dd>
+      <dt>错误</dt><dd>${escapeHtml(rec.error || '无')}</dd>
+      <dt>报告</dt><dd>${rec.reportPath ? `<code>${escapeHtml(rec.reportPath)}</code>` : '无'}</dd>
+    </dl>
+  `;
+
   openModal({
     title: `执行详情 · ${rec.taskName}`,
     body: `
-      <dl class="kv">
-        <dt>开始 / 结束</dt><dd>${fmtTime(rec.startedAt)} → ${fmtTime(rec.finishedAt)}</dd>
-        <dt>耗时</dt><dd>${fmtDuration(rec.durationMs)}</dd>
-        <dt>状态</dt><dd>${statusPill(rec.status)}</dd>
-        <dt>错误</dt><dd>${escapeHtml(rec.error || '无')}</dd>
-        <dt>报告</dt><dd>${rec.reportPath ? `<a href="#" id="openReportLink">${escapeHtml(rec.reportPath)}</a>` : '无'}</dd>
-      </dl>
-      <div class="section-title"><h3>提取结果</h3></div>
+      ${overview}
+      <div class="section-title"><h3>① 阶段时间线</h3></div>
+      ${renderPhaseTimeline(rec.phases || [])}
+      <div class="section-title"><h3>② 提取结果（aiQuery 返回值）</h3></div>
       <pre class="log">${escapeHtml(JSON.stringify(rec.extracted, null, 2))}</pre>
-      <div class="section-title"><h3>规则判定</h3></div>
-      ${
-        (rec.ruleResults || []).length
-          ? `<table class="table"><thead><tr><th>规则</th><th>严重度</th><th>结果</th><th>说明</th></tr></thead><tbody>${rec.ruleResults.map((r) => `<tr><td>${escapeHtml(r.ruleId)}</td><td>${r.severity}</td><td>${r.ok ? '<span class="status-pill ok">通过</span>' : '<span class="status-pill alert">未通过</span>'}</td><td>${escapeHtml(r.message)}</td></tr>`).join('')}</tbody></table>`
-          : '<div class="muted">无规则</div>'
-      }
-      <div class="section-title"><h3>执行日志</h3></div>
+      <div class="section-title"><h3>③ 规则判定（${triggered.length} / ${(rec.ruleResults || []).length} 触发）</h3></div>
+      ${renderRuleResultsCards(rec.ruleResults || [])}
+      <div class="section-title"><h3>④ 执行日志</h3></div>
       <pre class="log">${escapeHtml((rec.log || []).join('\n'))}</pre>
     `,
     primary: null,
     onRender: () => {
-      document.getElementById('openReportLink')?.addEventListener('click', (e) => {
-        e.preventDefault();
+      document.getElementById('openReportBtn')?.addEventListener('click', () => {
         api.openReport(rec.reportPath);
+      });
+      document.getElementById('copyMdBtn')?.addEventListener('click', async () => {
+        const md = buildRunMarkdown(rec);
+        try {
+          await navigator.clipboard.writeText(md);
+          document.getElementById('copyMdBtn').textContent = '已复制 ✓';
+        } catch {
+          alert(md);
+        }
       });
     },
   });
@@ -739,12 +868,22 @@ function openTaskAssistant() {
   renderAssistant('idle');
 }
 
+function ruleHumanLabel(r) {
+  const when = r.when === 'pass' ? '【期望成立】' : '【条件成立报警】';
+  if (r.type === 'threshold') {
+    const valLabel = r.op === 'between'
+      ? `[${r.value}, ${r.value2}]`
+      : `${r.op} ${r.value}`;
+    return `${when} 数值：<code>${escapeHtml(r.field || '')}</code> ${escapeHtml(valLabel)}（${r.severity || 'warning'}）`;
+  }
+  if (r.type === 'missing') {
+    return `${when} 缺失：<code>${escapeHtml(r.field || '')}</code> 为空（${r.severity || 'warning'}）`;
+  }
+  return `${when} 表达式：<code>${escapeHtml(r.expression || '')}</code>（${r.severity || 'warning'}）`;
+}
+
 function renderTaskSummary(t) {
-  const ruleLines = (t.rules || []).map((r) => {
-    if (r.type === 'threshold') return `阈值：<code>${escapeHtml(r.field)}</code> ${escapeHtml(r.op)} ${escapeHtml(String(r.value))}（${r.severity}）`;
-    if (r.type === 'missing') return `缺失：<code>${escapeHtml(r.field)}</code>（${r.severity}）`;
-    return `表达式：<code>${escapeHtml(r.expression || '')}</code>（${r.severity}）`;
-  });
+  const ruleLines = (t.rules || []).map(ruleHumanLabel);
   return `
     <div class="card" style="margin-top:1rem">
       <h3>AI 生成结果</h3>
@@ -973,30 +1112,45 @@ function renderWizardBody(step, d) {
   return '';
 }
 
+function whenSelect(rule) {
+  const when = rule.when === 'pass' ? 'pass' : 'fail';
+  return `<select class="rule-when" title="触发方向">
+    <option value="fail" ${when === 'fail' ? 'selected' : ''}>条件成立 → 报警</option>
+    <option value="pass" ${when === 'pass' ? 'selected' : ''}>条件成立 → 通过</option>
+  </select>`;
+}
+
+function severitySelect(rule) {
+  return `<select class="rule-severity">${['info','warning','critical'].map((s) => `<option value="${s}" ${s === (rule.severity || 'warning') ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
+}
+
 function renderRuleRow(rule) {
   if (rule.type === 'expression') {
     return `<div class="rule-row expression" data-rule-id="${escapeHtml(rule.id || '')}">
       <select class="rule-type"><option value="threshold">阈值</option><option value="missing">缺失</option><option value="expression" selected>表达式</option></select>
-      <input class="rule-expr" value="${escapeHtml(rule.expression || '')}" placeholder="例如: data.orderCount >= 10 && data.todayAmount > 0" />
-      <select class="rule-severity">${['info','warning','critical'].map((s) => `<option value="${s}" ${s === (rule.severity || 'warning') ? 'selected' : ''}>${s}</option>`).join('')}</select>
+      ${whenSelect(rule)}
+      <input class="rule-expr" value="${escapeHtml(rule.expression || '')}" placeholder="例如: data.balance < 10" />
+      ${severitySelect(rule)}
       <button class="small danger ghost" data-del-rule>删</button>
     </div>`;
   }
   if (rule.type === 'missing') {
     return `<div class="rule-row missing" data-rule-id="${escapeHtml(rule.id || '')}">
       <select class="rule-type"><option value="threshold">阈值</option><option value="missing" selected>缺失</option><option value="expression">表达式</option></select>
+      ${whenSelect(rule)}
       <input class="rule-field" value="${escapeHtml(rule.field || '')}" placeholder="字段路径，如 items 或 stats.total" />
-      <input class="rule-msg" value="${escapeHtml(rule.message || '')}" placeholder="失败提示（可选）" />
-      <select class="rule-severity">${['info','warning','critical'].map((s) => `<option value="${s}" ${s === (rule.severity || 'warning') ? 'selected' : ''}>${s}</option>`).join('')}</select>
+      <input class="rule-msg" value="${escapeHtml(rule.message || '')}" placeholder="告警标题（可选）" />
+      ${severitySelect(rule)}
       <button class="small danger ghost" data-del-rule>删</button>
     </div>`;
   }
   return `<div class="rule-row" data-rule-id="${escapeHtml(rule.id || '')}">
     <select class="rule-type"><option value="threshold" selected>阈值</option><option value="missing">缺失</option><option value="expression">表达式</option></select>
+    ${whenSelect(rule)}
     <input class="rule-field" value="${escapeHtml(rule.field || '')}" placeholder="字段路径" />
-    <select class="rule-op">${['>','>=','<','<=','==','!=','between'].map((o) => `<option value="${o}" ${o === (rule.op || '>=') ? 'selected' : ''}>${o}</option>`).join('')}</select>
+    <select class="rule-op">${['>','>=','<','<=','==','!=','between'].map((o) => `<option value="${o}" ${o === (rule.op || '<') ? 'selected' : ''}>${o}</option>`).join('')}</select>
     <input class="rule-value" value="${escapeHtml(rule.value ?? '')}" placeholder="阈值或下限" />
-    <select class="rule-severity">${['info','warning','critical'].map((s) => `<option value="${s}" ${s === (rule.severity || 'warning') ? 'selected' : ''}>${s}</option>`).join('')}</select>
+    ${severitySelect(rule)}
     <button class="small danger ghost" data-del-rule>删</button>
   </div>`;
 }
@@ -1008,8 +1162,8 @@ function bindStepInputs(step, d) {
     addBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.addRule;
-        const rule = { id: 'r_' + Math.random().toString(36).slice(2, 8), type: t, severity: 'warning' };
-        if (t === 'threshold') Object.assign(rule, { field: '', op: '>=', value: '' });
+        const rule = { id: 'r_' + Math.random().toString(36).slice(2, 8), type: t, when: 'fail', severity: 'warning' };
+        if (t === 'threshold') Object.assign(rule, { field: '', op: '<', value: '' });
         if (t === 'missing') Object.assign(rule, { field: '' });
         if (t === 'expression') Object.assign(rule, { expression: '' });
         box.insertAdjacentHTML('beforeend', renderRuleRow(rule));
@@ -1051,20 +1205,21 @@ function readStep(step, d, strict) {
     rows.forEach((row) => {
       const type = row.querySelector('.rule-type').value;
       const severity = row.querySelector('.rule-severity').value;
+      const when = row.querySelector('.rule-when')?.value === 'pass' ? 'pass' : 'fail';
       const id = row.dataset.ruleId || 'r_' + Math.random().toString(36).slice(2, 8);
       if (type === 'threshold') {
-        rules.push({ id, type, severity,
+        rules.push({ id, type, when, severity,
           field: row.querySelector('.rule-field').value.trim(),
           op: row.querySelector('.rule-op').value,
           value: row.querySelector('.rule-value').value,
         });
       } else if (type === 'missing') {
-        rules.push({ id, type, severity,
+        rules.push({ id, type, when, severity,
           field: row.querySelector('.rule-field').value.trim(),
           message: row.querySelector('.rule-msg').value,
         });
       } else {
-        rules.push({ id, type, severity,
+        rules.push({ id, type, when, severity,
           expression: row.querySelector('.rule-expr').value,
         });
       }
