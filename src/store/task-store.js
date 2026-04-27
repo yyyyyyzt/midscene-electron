@@ -34,6 +34,17 @@ const LEGACY_RECIPE = 'task-recipe.json';
  *   description: string;
  *   runMode: 'newTabWithUrl' | 'currentTab';
  *   closeTabAfter: boolean;
+ *   extractMode: 'aiQuery' | 'developer';
+ *   developerExtract: {
+ *     mode: 'http' | 'script';
+ *     method: string;
+ *     url: string;
+ *     headers: Record<string, string>;
+ *     body: string;
+ *     preScript: string;
+ *     pageScript: string;
+ *     fieldMappings: Array<{ key: string; path?: string; expression?: string }>;
+ *   };
  *   readyPrompt: string;
  *   extractPrompt: string;
  *   extractSchema: string;
@@ -71,6 +82,17 @@ const TEMPLATE = {
   description: '',
   runMode: 'newTabWithUrl',
   closeTabAfter: true,
+  extractMode: 'aiQuery',
+  developerExtract: {
+    mode: 'http',
+    method: 'GET',
+    url: '',
+    headers: {},
+    body: '',
+    preScript: '',
+    pageScript: '',
+    fieldMappings: [],
+  },
   readyPrompt: '请在页面上确认主要指标卡片/表格已经加载完成',
   extractPrompt: '请提取页面上的关键指标，返回 JSON 对象',
   extractSchema: '',
@@ -116,6 +138,10 @@ function normalizeTask(raw) {
     id: typeof raw.id === 'string' && raw.id ? raw.id : randomUUID(),
     ...TEMPLATE,
     ...raw,
+    developerExtract: {
+      ...TEMPLATE.developerExtract,
+      ...(raw.developerExtract && typeof raw.developerExtract === 'object' ? raw.developerExtract : {}),
+    },
     schedule: { ...TEMPLATE.schedule, ...(raw.schedule || {}) },
     alert: { ...TEMPLATE.alert, ...(raw.alert || {}) },
     rules: Array.isArray(raw.rules) ? raw.rules : [],
@@ -123,6 +149,7 @@ function normalizeTask(raw) {
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now(),
   });
   if (t.runMode !== 'currentTab') t.runMode = 'newTabWithUrl';
+  if (t.extractMode !== 'developer') t.extractMode = 'aiQuery';
   return t;
 }
 

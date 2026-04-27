@@ -1,4 +1,5 @@
 import { createBridgeAgent } from './chrome-runner.js';
+import { executeDeveloperExtract, taskUsesDeveloperExtract } from './developer-extract.js';
 import { evaluateRules } from './rule-engine.js';
 import { parseFlowInput } from './yaml-flow.js';
 import { runSteps } from './step-runner.js';
@@ -181,18 +182,29 @@ export async function runInspection(ctx) {
       }
 
       let extracted = null;
-      if (task.extractPrompt?.trim()) {
+      const useDev = taskUsesDeveloperExtract(task);
+      if (useDev) {
+        const r = await runPhase(PHASE.QUERY, '提取数据（开发者 · 页面上下文）', async () => {
+          const out = await executeDeveloperExtract(agent, task.developerExtract, log);
+          return out.detail;
+        });
+        extracted = r.detail.mapped;
+      } else if (task.extractPrompt?.trim()) {
         const r = await runPhase(PHASE.QUERY, '提取数据 aiQuery', async () => {
           const schema = task.extractSchema?.trim();
           const prompt = schema
             ? `${task.extractPrompt.trim()}\n\n返回 JSON，结构需满足：${schema}`
             : task.extractPrompt.trim();
           const out = await agent.aiQuery(prompt);
-          return { prompt, schema: schema || null, value: out };
+          return { extractSource: 'aiQuery', prompt, schema: schema || null, value: out };
         });
         extracted = r.detail.value;
       } else {
-        skipPhase(PHASE.QUERY, '提取数据 aiQuery', '未配置 extractPrompt');
+        skipPhase(
+          PHASE.QUERY,
+          '提取数据',
+          '未配置：请在「开发者取数」填写 URL/脚本，或填写 aiQuery 的 extractPrompt',
+        );
       }
 
       const rulePhase = await runPhase(PHASE.RULES, '规则判定', async () => {
