@@ -1,119 +1,223 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, clipboard } from 'electron';
-import { loadConfig, saveConfig } from './config-store.js';
-import { mergeTaskPrompts, runNaturalLanguageTask } from './chrome-runner.js';
-import { loadRecipe, saveRecipe } from './recipe-store.js';
-import { exportTaskBundle, importTaskBundle } from './task-bundle.js';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+
+import { loadConfig, saveConfig, buildModelEnv } from './store/config-store.js';
+import {
+  loadAllTasks,
+  getTask,
+  createTask,
+  updateTask,
+  deleteTask,
+} from './store/task-store.js';
+import {
+  listRecentRuns,
+  getRun,
+  stats,
+} from './store/run-store.js';
+import {
+  listAlerts,
+  updateAlertState,
+} from './store/alert-store.js';
+import { Scheduler } from './scheduler/scheduler.js';
+import { notify, openReport } from './alerts/notifier.js';
+import { runInspection } from './runtime/inspection-runner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
-let running = false;
+/** @type {Scheduler | null} */
+let scheduler = null;
+let tray = null;
+let quitting = false;
+let runDir = '';
+let testRunning = false;
+
+function userDataPath() {
+  return app.getPath('userData');
+}
+
+function broadcast(channel, payload) {
+  if (mainWindow?.webContents) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 760,
-    height: 820,
+    width: 1100,
+    height: 780,
+    minWidth: 960,
+    minHeight: 640,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+
+  mainWindow.on('close', (e) => {
+    if (!quitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
 }
 
-function broadcastLog(line) {
-  if (mainWindow?.webContents) {
-    mainWindow.webContents.send('task:log', line);
-  }
+function setupTray() {
+  const icon = nativeImage.createEmpty();
+  tray = new Tray(icon);
+  tray.setToolTip('Bridge 巡检工作台');
+  const menu = Menu.buildFromTemplate([
+    {
+      label: '显示主窗口',
+      click: () => {
+        if (!mainWindow) createWindow();
+        mainWindow.show();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => {
+        quitting = true;
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('click', () => {
+    if (!mainWindow) return;
+    mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
+  });
+}
+
+function ensureRunDir() {
+  runDir = path.join(userDataPath(), 'midscene_run');
+  fs.mkdirSync(runDir, { recursive: true });
+}
+
+function startScheduler() {
+  scheduler = new Scheduler({
+    userDataPath: userDataPath(),
+    runDir,
+    onLog: (line) => broadcast('task:log', line),
+    onRunUpdate: (run) => broadcast('scheduler:event', { type: 'run-update', run }),
+  });
+  scheduler.on((evt) => {
+    broadcast('scheduler:event', evt);
+    if (evt.type === 'alert-new' && evt.shouldNotify) {
+      notify({
+        title: `巡检异常: ${evt.event.taskName}`,
+        body: evt.event.lastMessage,
+        onClick: () => {
+          mainWindow?.show();
+          broadcast('scheduler:event', { type: 'open-alert', alertId: evt.event.id });
+        },
+      });
+    } else if (evt.type === 'alert-update' && evt.shouldNotify) {
+      notify({
+        title: `异常持续: ${evt.event.taskName}（共 ${evt.event.count} 次）`,
+        body: evt.event.lastMessage,
+        silent: true,
+      });
+    } else if (evt.type === 'alert-recovered') {
+      notify({
+        title: `已恢复: ${evt.event.taskName}`,
+        body: '最近一次巡检通过。',
+      });
+    }
+  });
+  scheduler.start();
 }
 
 app.whenReady().then(() => {
+  ensureRunDir();
   createWindow();
+  setupTray();
+  startScheduler();
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else mainWindow?.show();
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+app.on('window-all-closed', (e) => {
+  if (process.platform !== 'darwin') {
+    if (!quitting) {
+      e.preventDefault();
+    }
+  }
 });
 
-ipcMain.handle('config:load', () => loadConfig(app.getPath('userData')));
-
-ipcMain.handle('config:save', (_e, patch) => saveConfig(app.getPath('userData'), patch ?? {}));
-
-ipcMain.handle('recipe:load', () => loadRecipe(app.getPath('userData')));
-
-ipcMain.handle('recipe:save', (_e, patch) => saveRecipe(app.getPath('userData'), patch ?? {}));
-
-ipcMain.handle('bundle:export', (_e, recipe) => {
-  return exportTaskBundle({
-    name: recipe?.name,
-    mainPrompt: recipe?.mainPrompt ?? '',
-    businessContext: recipe?.businessContext ?? '',
-  });
+app.on('before-quit', () => {
+  quitting = true;
+  scheduler?.stop();
 });
 
-ipcMain.handle('bundle:import', (_e, text) => importTaskBundle(text));
+ipcMain.handle('config:load', () => loadConfig(userDataPath()));
+ipcMain.handle('config:save', (_e, patch) => saveConfig(userDataPath(), patch ?? {}));
 
-ipcMain.handle('clipboard:write', (_e, text) => {
-  clipboard.writeText(String(text ?? ''));
+ipcMain.handle('task:list', () => loadAllTasks(userDataPath()));
+ipcMain.handle('task:get', (_e, id) => getTask(userDataPath(), id));
+ipcMain.handle('task:create', (_e, patch) => createTask(userDataPath(), patch ?? {}));
+ipcMain.handle('task:update', (_e, { id, patch }) => updateTask(userDataPath(), id, patch ?? {}));
+ipcMain.handle('task:delete', (_e, id) => {
+  deleteTask(userDataPath(), id);
+  return { ok: true };
+});
+ipcMain.handle('task:pause', (_e, { id, paused }) =>
+  updateTask(userDataPath(), id, { paused: Boolean(paused) }),
+);
+ipcMain.handle('task:run', (_e, id) => {
+  if (!scheduler) return { ok: false, error: 'scheduler 未启动' };
+  scheduler.enqueueNow(id);
   return { ok: true };
 });
 
-ipcMain.handle('clipboard:read', () => clipboard.readText());
-
-ipcMain.handle('task:run', async (_e, payload) => {
-  if (running) {
-    return { ok: false, error: '已有任务在执行，请等待结束。' };
-  }
-
-  let mainPrompt = '';
-  let businessContext = '';
-  if (typeof payload === 'string') {
-    mainPrompt = payload;
-  } else if (payload && typeof payload === 'object') {
-    mainPrompt = payload.mainPrompt ?? '';
-    businessContext = payload.businessContext ?? '';
-  }
-
-  const main = String(mainPrompt).trim();
-  if (!main) {
-    return { ok: false, error: '请填写主任务（要执行的操作）。' };
-  }
-
-  const cfg = loadConfig(app.getPath('userData'));
-  if (!cfg.apiKey?.trim()) {
-    return { ok: false, error: '请先在设置中填写 API Key。' };
-  }
-
-  const midsceneRunDir = path.join(app.getPath('userData'), 'midscene_run');
-  const modelConfig = {
-    MIDSCENE_MODEL_API_KEY: cfg.apiKey.trim(),
-    MIDSCENE_MODEL_BASE_URL: cfg.baseUrl.trim() || 'https://api.openai.com/v1',
-    MIDSCENE_MODEL_NAME: cfg.modelName.trim() || 'gpt-4.1',
-    MIDSCENE_MODEL_FAMILY: cfg.modelFamily.trim() || 'gpt-4',
-    MIDSCENE_RUN_DIR: midsceneRunDir,
-  };
-
-  const merged = mergeTaskPrompts(main, businessContext);
-
-  running = true;
+/**
+ * 向导里“测试执行一次”的独立入口，不走调度器，不写入执行记录，
+ * 仅返回提取结果与规则结果，便于用户校验 prompt/schema/规则。
+ */
+ipcMain.handle('task:test', async (_e, taskPayload) => {
+  if (testRunning) return { ok: false, error: '已有测试在执行' };
+  testRunning = true;
   try {
-    await runNaturalLanguageTask(merged, {
+    const cfg = loadConfig(userDataPath());
+    if (!cfg.defaultModel.apiKey?.trim()) {
+      return { ok: false, error: '请先在设置中填写默认模型 API Key。' };
+    }
+    const modelConfig = buildModelEnv(cfg, runDir);
+    const log = (line) => broadcast('task:log', `[test] ${line}`);
+    const result = await runInspection({
+      task: taskPayload,
       modelConfig,
       bridgePort: cfg.bridgePort,
-    }, (line) => broadcastLog(line));
-    return { ok: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    broadcastLog(`错误: ${message}`);
-    return { ok: false, error: message };
+      timeoutMs: (taskPayload.schedule?.timeoutSeconds || 180) * 1000,
+      log,
+    });
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   } finally {
-    running = false;
+    testRunning = false;
   }
 });
+
+ipcMain.handle('run:list', (_e, { taskId, limit }) =>
+  listRecentRuns(userDataPath(), taskId || null, limit || 50),
+);
+ipcMain.handle('run:get', (_e, id) => getRun(userDataPath(), id));
+ipcMain.handle('run:openReport', (_e, p) => {
+  openReport(p);
+  return { ok: true };
+});
+ipcMain.handle('run:stats', () => stats(userDataPath()));
+
+ipcMain.handle('alert:list', () => listAlerts(userDataPath()));
+ipcMain.handle('alert:update', (_e, { id, action, minutes }) =>
+  updateAlertState(userDataPath(), id, action, minutes),
+);
