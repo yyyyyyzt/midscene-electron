@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   updateAlertState: (id, action, minutes) =>
     ipcRenderer.invoke('alert:update', { id, action, minutes }),
 
+  listPresets: () => ipcRenderer.invoke('preset:list'),
+  generateTask: (description) => ipcRenderer.invoke('task:generate', { description }),
+
   onSchedulerEvent: (cb) => {
     const listener = (_e, payload) => cb(payload);
     ipcRenderer.on('scheduler:event', listener);
