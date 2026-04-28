@@ -109,14 +109,25 @@ function statusPill(status) {
   return `<span class="status-pill ${cls}">${label}</span>`;
 }
 
+const VALID_ALERT_UI_STATES = new Set(['active', 'ack', 'silenced', 'recovered']);
+
+/** @param {unknown} raw */
+function normalizeAlertStateForUi(raw) {
+  if (raw == null || raw === '') return 'active';
+  const s = String(raw).trim().toLowerCase();
+  if (VALID_ALERT_UI_STATES.has(s)) return /** @type {'active' | 'ack' | 'silenced' | 'recovered'} */ (s);
+  return 'active';
+}
+
 function alertStatePill(s) {
+  const st = normalizeAlertStateForUi(s);
   const map = {
     active: ['err', '未处理'],
     ack: ['ack', '已确认'],
     silenced: ['silenced', '已静默'],
     recovered: ['recovered', '已恢复'],
   };
-  const [cls, label] = map[s] || ['paused', s];
+  const [cls, label] = map[st] || ['paused', String(s || '-')];
   return `<span class="status-pill ${cls}">${label}</span>`;
 }
 
@@ -191,7 +202,7 @@ async function refreshAlerts() {
 
 function updateBadges() {
   taskCountBadge.textContent = state.tasks.length ? String(state.tasks.length) : '';
-  const needsAttention = state.alerts.filter((a) => a.state === 'active').length;
+  const needsAttention = state.alerts.filter((a) => normalizeAlertStateForUi(a.state) === 'active').length;
   alertBadge.textContent = needsAttention ? String(needsAttention) : '';
 }
 
@@ -728,26 +739,29 @@ function renderAlerts() {
     ${
       alerts.length
         ? `<div class="muted" style="margin-bottom:.6rem">共 ${alerts.length} 条</div>` + alerts.map((a) => {
-          const ackDone = a.state === 'ack' || a.state === 'silenced' || a.state === 'recovered';
-          const ackDisabled = a.state === 'recovered';
-          const ackTitle = a.state === 'recovered'
+          const st = normalizeAlertStateForUi(a.state);
+          const ackDone = st === 'ack' || st === 'silenced' || st === 'recovered';
+          const ackDisabled = st === 'recovered';
+          const ackTitle = st === 'recovered'
             ? '任务已恢复正常，无需再确认'
             : ackDone
-              ? '已确认过；仍可再次标记'
+              ? '已再次标记为已知晓'
               : '标记为已知晓（仍会继续合并计数与恢复检测）';
+          const ackBtnLabel = st === 'recovered' ? '—' : ackDone ? '再次确认' : '确认无误';
+          const ackBtnClass = ackDone && !ackDisabled ? 'small ghost' : 'small';
           return `
           <div class="alert-row" data-alert-id="${a.id}">
             <div>
               <div class="row" style="gap:.4rem;flex-wrap:wrap">
                 <span class="msg">${escapeHtml(a.taskName)}</span>
-                ${alertStatePill(a.state)}
+                ${alertStatePill(st)}
                 <span class="status-pill ${a.lastSeverity === 'critical' ? 'err' : 'alert'}">${a.lastSeverity}</span>
               </div>
               <div class="detail">${escapeHtml(a.lastMessage)}</div>
               <div class="detail">首次：${fmtTime(a.firstSeenAt)} · 最近：${fmtTime(a.lastSeenAt)} · 合并计数：${a.count}${a.recoveredAt ? ' · 恢复：' + fmtTime(a.recoveredAt) : ''}${a.silencedUntil ? ' · 曾静默至：' + fmtTime(a.silencedUntil) : ''}</div>
             </div>
             <div class="row alert-row-actions">
-              <button class="small" data-alert-action="ack" ${ackDisabled ? 'disabled' : ''} title="${escapeHtml(ackTitle)}">确认无误</button>
+              <button class="${ackBtnClass}" data-alert-action="ack" ${ackDisabled ? 'disabled' : ''} title="${escapeHtml(ackTitle)}">${escapeHtml(ackBtnLabel)}</button>
               <button class="small primary" data-alert-view="${a.lastRunId || ''}" ${a.lastRunId ? '' : 'disabled'} title="${a.lastRunId ? '打开对应执行记录' : '暂无关联执行记录'}">查看执行详情</button>
               <button class="small danger ghost" data-alert-delete="${a.id}">删除</button>
             </div>
@@ -777,9 +791,21 @@ function renderAlerts() {
     row.querySelectorAll('[data-alert-action="ack"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         if (btn.disabled) return;
-        await api.updateAlertState(id, 'ack');
-        await refreshAlerts();
-        render();
+        const prev = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          const updated = await api.updateAlertState(id, 'ack');
+          if (updated == null) {
+            alert('未找到该告警，可能已被删除');
+          }
+          await refreshAlerts();
+          render();
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = prev;
+          alert(e instanceof Error ? e.message : String(e));
+        }
       });
     });
     row.querySelectorAll('[data-alert-view]').forEach((btn) => {
