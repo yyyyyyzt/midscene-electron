@@ -36,18 +36,25 @@ npm install
 npm start
 ```
 
-## 构建 Windows 安装包
+## 构建 Windows 绿色版（默认）
 
-使用 `electron-builder` 生成 Windows NSIS 安装器（`.exe`）。
+默认只打 **portable** 单文件绿色版（无需安装器、不生成 NSIS 安装包），适合值守机解压即用。
 
 ```bash
 npm install
-npm run dist:win
-npm run dist:win-portable
 npm run dist
+# 或显式：npm run dist:win / npm run dist:win-portable
 ```
 
-产出在 `dist/` 目录。
+产出在 `dist/` 目录（例如 `Bridge 巡检工作台-x.x.x-portable.exe`）。
+
+如需 **NSIS 安装包**（可安装版）：
+
+```bash
+npm run dist:win-installer
+```
+
+### 跨平台构建与签名
 
 ### 跨平台构建与签名
 
