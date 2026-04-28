@@ -731,7 +731,7 @@ function renderAlerts() {
 
   contentEl.innerHTML = `
     <div class="page-header">
-      <div><h2>告警中心</h2><div class="sub">每条告警仅三项操作：确认无误、查看执行详情、删除。后台仍合并同类告警并在任务恢复时自动标记已恢复。</div></div>
+      <div><h2>告警中心</h2><div class="sub">未处理告警可点「确认无误」；确认后仅保留查看执行详情、删除。后台仍合并同类告警并在任务恢复时自动标记已恢复。</div></div>
       <div class="row">
         <button class="small" id="btnRefreshAlerts">刷新</button>
       </div>
@@ -740,15 +740,11 @@ function renderAlerts() {
       alerts.length
         ? `<div class="muted" style="margin-bottom:.6rem">共 ${alerts.length} 条</div>` + alerts.map((a) => {
           const st = normalizeAlertStateForUi(a.state);
-          const ackDone = st === 'ack' || st === 'silenced' || st === 'recovered';
-          const ackDisabled = st === 'recovered';
-          const ackTitle = st === 'recovered'
-            ? '任务已恢复正常，无需再确认'
-            : ackDone
-              ? '已再次标记为已知晓'
-              : '标记为已知晓（仍会继续合并计数与恢复检测）';
-          const ackBtnLabel = st === 'recovered' ? '—' : ackDone ? '再次确认' : '确认无误';
-          const ackBtnClass = ackDone && !ackDisabled ? 'small ghost' : 'small';
+          const showAck = st === 'active';
+          const ackTitle = '标记为已知晓（仍会继续合并计数与恢复检测）';
+          const ackBtn = showAck
+            ? `<button class="small" data-alert-action="ack" title="${escapeHtml(ackTitle)}">确认无误</button>`
+            : '';
           return `
           <div class="alert-row" data-alert-id="${a.id}">
             <div>
@@ -761,7 +757,7 @@ function renderAlerts() {
               <div class="detail">首次：${fmtTime(a.firstSeenAt)} · 最近：${fmtTime(a.lastSeenAt)} · 合并计数：${a.count}${a.recoveredAt ? ' · 恢复：' + fmtTime(a.recoveredAt) : ''}${a.silencedUntil ? ' · 曾静默至：' + fmtTime(a.silencedUntil) : ''}</div>
             </div>
             <div class="row alert-row-actions">
-              <button class="${ackBtnClass}" data-alert-action="ack" ${ackDisabled ? 'disabled' : ''} title="${escapeHtml(ackTitle)}">${escapeHtml(ackBtnLabel)}</button>
+              ${ackBtn}
               <button class="small primary" data-alert-view="${a.lastRunId || ''}" ${a.lastRunId ? '' : 'disabled'} title="${a.lastRunId ? '打开对应执行记录' : '暂无关联执行记录'}">查看执行详情</button>
               <button class="small danger ghost" data-alert-delete="${a.id}">删除</button>
             </div>
