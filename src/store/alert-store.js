@@ -32,10 +32,23 @@ function filePath(userDataPath) {
   return path.join(userDataPath, FILE_NAME);
 }
 
+const VALID_ALERT_STATES = new Set(['active', 'ack', 'silenced', 'recovered']);
+
+/** @param {unknown} raw */
+function normalizeAlertState(raw) {
+  if (raw == null || raw === '') return 'active';
+  const s = String(raw).trim().toLowerCase();
+  if (VALID_ALERT_STATES.has(s)) return /** @type {'active' | 'ack' | 'silenced' | 'recovered'} */ (s);
+  return 'active';
+}
+
 function load(userDataPath) {
   try {
     const raw = JSON.parse(fs.readFileSync(filePath(userDataPath), 'utf8'));
-    if (Array.isArray(raw)) return raw;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((e) => e && typeof e === 'object')
+      .map((e) => ({ ...e, state: normalizeAlertState(e.state) }));
   } catch {}
   return [];
 }
@@ -78,6 +91,7 @@ export function reportFailure(userDataPath, input) {
   const existing = findOpen(list, input.taskId);
   const nowTs = Date.now();
   if (existing) {
+    existing.state = normalizeAlertState(existing.state);
     existing.lastSeenAt = nowTs;
     existing.count += 1;
     existing.lastRunId = input.runId;
@@ -143,6 +157,7 @@ export function updateAlertState(userDataPath, id, action, silenceMinutes) {
   const list = load(userDataPath);
   const ev = list.find((e) => e.id === id);
   if (!ev) return null;
+  ev.state = normalizeAlertState(ev.state);
   if (action === 'ack') {
     ev.state = 'ack';
   } else if (action === 'silence') {
@@ -162,7 +177,10 @@ export function updateAlertState(userDataPath, id, action, silenceMinutes) {
  * @param {string} userDataPath
  */
 export function countUnresolved(userDataPath) {
-  return load(userDataPath).filter((e) => e.state === 'active' || e.state === 'ack').length;
+  return load(userDataPath).filter((e) => {
+    const st = normalizeAlertState(e.state);
+    return st === 'active' || st === 'ack';
+  }).length;
 }
 
 /**
