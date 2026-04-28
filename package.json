@@ -1,9 +1,9 @@
 {
   "name": "bridge-inspection-workbench",
-  "productName": "Bridge 巡检工作台",
+  "productName": "自动办公助手",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron + Midscene Bridge 巡检工作台（Windows 专用值守电脑）",
+  "description": "Electron + Midscene 自动办公助手（Windows 专用值守电脑）",
   "type": "module",
   "main": "src/main.js",
   "scripts": {
@@ -27,7 +27,7 @@
   },
   "build": {
     "appId": "com.bridge-workbench.app",
-    "productName": "Bridge 巡检工作台",
+    "productName": "自动办公助手",
     "asar": true,
     "directories": {
       "output": "dist",
@@ -57,7 +57,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Bridge 巡检工作台"
+      "shortcutName": "自动办公助手"
     },
     "mac": {
       "target": [

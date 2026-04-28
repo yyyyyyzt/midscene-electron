@@ -75,7 +75,7 @@ function createWindow() {
 function setupTray() {
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
-  tray.setToolTip('Bridge 巡检工作台');
+  tray.setToolTip('自动办公助手');
   const menu = Menu.buildFromTemplate([
     {
       label: '显示主窗口',

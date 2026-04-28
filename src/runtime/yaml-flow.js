@@ -77,7 +77,7 @@ export function parseYamlFlow(text) {
       if (Number.isFinite(doc.web.viewportHeight)) meta.viewportHeight = Number(doc.web.viewportHeight);
     }
     if (doc.android || doc.ios || doc.computer) {
-      warnings.push('YAML 里包含 android/ios/computer 配置，Bridge 巡检工作台只会执行 web flow。');
+      warnings.push('YAML 里包含 android/ios/computer 配置，自动办公助手只会执行 web flow。');
     }
     if (Array.isArray(doc.tasks)) {
       if (doc.tasks.length > 1) warnings.push(`检测到 ${doc.tasks.length} 个 task，仅使用第 1 个。`);

@@ -63,9 +63,9 @@ npm run dist
 
 数据写入 Electron `userData`（升级安装不丢任务与历史）：
 
-- Windows: `%APPDATA%\Bridge 巡检工作台\`
-- macOS: `~/Library/Application Support/Bridge 巡检工作台/`
-- Linux: `~/.config/Bridge 巡检工作台/`
+- Windows: `%APPDATA%\自动办公助手\`
+- macOS: `~/Library/Application Support/自动办公助手/`
+- Linux: `~/.config/自动办公助手/`
 
 典型文件：`app-config.json`、`tasks.json`、`runs/`、`alerts.json`、`midscene_run/`。
 
